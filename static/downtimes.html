@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Duruş Analizi — Fabrika IoT</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=DM+Sans:wght@400;500;700;900&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box;}
+  :root{--bg:#0a0e17;--card:#111827;--card2:#1a2035;--border:#1e293b;--text:#e2e8f0;--dim:#64748b;--green:#10b981;--blue:#3b82f6;--red:#ef4444;--amber:#f59e0b;--purple:#8b5cf6;--cyan:#06b6d4;}
+  body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min-height:100vh;padding:16px;}
+
+  .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:8px;}
+  .top h1{font-size:18px;font-weight:900;}
+  .top h1 span{color:var(--red);}
+  .sub{font-size:12px;color:var(--dim);margin-bottom:14px;}
+  .back{padding:6px 12px;border-radius:6px;font-size:11px;font-weight:700;background:var(--card2);color:var(--dim);text-decoration:none;border:1px solid var(--border);}
+  .back:hover{color:var(--text);}
+
+  .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;}
+  .controls label{font-size:11px;color:var(--dim);}
+  .seg{display:flex;border:1px solid var(--border);border-radius:7px;overflow:hidden;}
+  .seg button{background:var(--card2);color:var(--dim);border:none;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;}
+  .seg button.on{background:var(--blue);color:white;}
+  .chk{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dim);cursor:pointer;user-select:none;}
+  .chk input{width:15px;height:15px;accent-color:var(--blue);}
+
+  .card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:12px;}
+  .card-label{font-size:9px;letter-spacing:1.5px;color:var(--dim);text-transform:uppercase;margin-bottom:10px;}
+
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px;}
+  @media(max-width:760px){.kpis{grid-template-columns:repeat(2,1fr);}}
+  .kpi{background:var(--card2);border-radius:8px;padding:12px;}
+  .kpi .v{font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;line-height:1.05;}
+  .kpi .l{font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-top:4px;}
+
+  .chart-grid{display:grid;grid-template-columns:3fr 2fr;gap:12px;}
+  @media(max-width:880px){.chart-grid{grid-template-columns:1fr;}}
+  .chart-card{cursor:pointer;transition:border-color .15s;}
+  .chart-card:hover{border-color:var(--blue);}
+  .chart-card .hint{float:right;font-size:11px;color:var(--dim);font-weight:400;letter-spacing:0;}
+  .chart-wrap{width:100%;position:relative;}
+  svg{width:100%;height:auto;display:block;}
+  .empty{text-align:center;color:var(--dim);font-size:13px;padding:40px 0;}
+
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;justify-content:center;}
+  .legend span{font-size:11px;color:var(--dim);display:flex;align-items:center;gap:5px;}
+  .legend i{width:12px;height:12px;border-radius:3px;display:inline-block;}
+
+  table{width:100%;border-collapse:collapse;font-size:12px;}
+  th{text-align:left;padding:8px;color:var(--dim);font-size:9px;letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid var(--border);}
+  td{padding:8px;border-bottom:1px solid var(--border);}
+  .dotc{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:middle;}
+  .mono{font-family:'JetBrains Mono',monospace;}
+
+  .tip{position:absolute;pointer-events:none;background:#0f1626;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--text);box-shadow:0 6px 20px rgba(0,0,0,.55);z-index:5;display:none;white-space:nowrap;}
+  .tip .th{font-size:10px;color:var(--dim);margin-bottom:5px;font-family:'JetBrains Mono',monospace;}
+  .tip .tr{display:flex;align-items:center;gap:6px;font-family:'JetBrains Mono',monospace;line-height:1.6;}
+  .tip .tr i{width:10px;height:10px;border-radius:2px;display:inline-block;flex-shrink:0;}
+
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;z-index:50;padding:20px;}
+  .modal.open{display:flex;}
+  .modal-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;width:min(1100px,94vw);max-height:92vh;overflow:auto;position:relative;}
+  .modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
+  .modal-head h3{font-size:15px;font-weight:800;}
+  .modal-close{background:var(--card2);border:1px solid var(--border);color:var(--text);width:34px;height:34px;border-radius:8px;cursor:pointer;font-size:18px;line-height:1;}
+  .modal-close:hover{border-color:var(--red);color:var(--red);}
+
+  .footer{text-align:center;color:var(--dim);font-size:10px;margin-top:10px;}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <h1>⏱ Duruş <span>Analizi</span></h1>
+  <a class="back" href="/static/dashboard.html">← Dashboard</a>
+</div>
+<div class="sub" id="sub">—</div>
+
+<div class="controls">
+  <div class="seg" id="rangeSeg">
+    <button data-d="7">7 gün</button>
+    <button data-d="15" class="on">15 gün</button>
+    <button data-d="30">30 gün</button>
+  </div>
+  <label class="chk" style="margin-left:8px;">
+    <input type="checkbox" id="inclShiftEnd"> Vardiya sonunu dahil et
+  </label>
+</div>
+
+<div class="kpis">
+  <div class="kpi"><div class="v" style="color:var(--red);" id="kTotal">—</div><div class="l">Toplam Duruş Süresi</div></div>
+  <div class="kpi"><div class="v" style="color:var(--amber);" id="kCount">—</div><div class="l">Duruş Adedi</div></div>
+  <div class="kpi"><div class="v" style="color:var(--purple);" id="kUnplanned">—</div><div class="l">Plansız Pay</div></div>
+  <div class="kpi"><div class="v" style="color:var(--cyan);font-size:15px;" id="kTop">—</div><div class="l">En Çok Süre Yiyen</div></div>
+</div>
+
+<div class="card chart-card" id="timelineCard" data-chart="timeline" style="display:none;">
+  <div class="card-label">Duruş Zaman Çizelgesi — <span id="tlSub"></span> <span class="hint">⤢ büyüt</span></div>
+  <div class="chart-wrap" id="timelineChart"></div>
+</div>
+
+<div class="chart-grid">
+  <div class="card chart-card" data-chart="pareto">
+    <div class="card-label">Sebep Bazlı Duruş Süresi (Pareto) <span class="hint">⤢ büyüt</span></div>
+    <div class="chart-wrap" id="paretoChart"></div>
+  </div>
+  <div class="card chart-card" data-chart="donut">
+    <div class="card-label">Planlı / Plansız <span class="hint">⤢ büyüt</span></div>
+    <div class="chart-wrap" id="donutChart"></div>
+  </div>
+</div>
+
+<div class="card chart-card" data-chart="daily">
+  <div class="card-label">Günlük Duruş Trendi (sebep bazlı yığılmış) <span class="hint">⤢ büyüt</span></div>
+  <div class="chart-wrap" id="dailyChart"></div>
+</div>
+
+<div class="card">
+  <div class="card-label">Sebep Tablosu</div>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Sebep</th><th>Tür</th><th>Adet</th><th>Toplam</th><th>Ortalama</th><th>Pay</th></tr></thead>
+      <tbody id="reasonTable"><tr><td colspan="6" class="empty">Yükleniyor...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="modal" id="modal" onclick="if(event.target===this)closeModal()">
+  <div class="modal-card">
+    <div class="modal-head"><h3 id="modalTitle">—</h3><button class="modal-close" onclick="closeModal()">✕</button></div>
+    <div class="chart-wrap" id="modalBody"></div>
+  </div>
+</div>
+
+<div class="card" id="qualityCard" style="display:none;">
+  <div class="card-label">🗑 Kalite Raporu — <span id="qSub"></span></div>
+  <div class="kpis" style="margin-bottom:12px;">
+    <div class="kpi"><div class="v" style="color:var(--green);" id="qProd">—</div><div class="l">Üretim (adet)</div></div>
+    <div class="kpi"><div class="v" style="color:var(--red);" id="qScrap">—</div><div class="l">Fire (adet)</div></div>
+    <div class="kpi"><div class="v" style="color:var(--purple);" id="qRate">—</div><div class="l">Fire Oranı</div></div>
+    <div class="kpi"><div class="v" style="color:var(--cyan);font-size:15px;" id="qTop">—</div><div class="l">En Çok Fire Sebebi</div></div>
+  </div>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Fire Sebebi</th><th>Adet</th><th>Pay</th></tr></thead>
+      <tbody id="qScrapTable"><tr><td colspan="3" class="empty">—</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="footer">Fabrika IoT · Duruş analizi</div>
+
+<script>
+const API=window.location.origin;
+const NS='http://www.w3.org/2000/svg';
+function el(t,a){const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);return e;}
+function clear(n){while(n.firstChild)n.removeChild(n.firstChild);}
+function emptyMsg(c,m){clear(c);const d=document.createElement('div');d.className='empty';d.textContent=m||'Veri yok';c.appendChild(d);}
+function tipPosition(tip,container,e){const r=container.getBoundingClientRect();let l=e.clientX-r.left+14,t=e.clientY-r.top+14;const tw=tip.offsetWidth,th=tip.offsetHeight;if(l+tw>r.width)l=e.clientX-r.left-tw-14;if(l<0)l=4;if(t+th>r.height)t=Math.max(4,r.height-th-6);tip.style.left=l+'px';tip.style.top=t+'px';}
+function fmtDur(sec){sec=Math.round(sec);if(sec<60)return sec+' sn';const m=Math.floor(sec/60);if(m<60)return m+' dk';const h=Math.floor(m/60);return h+' sa '+(m%60)+' dk';}
+function fmtDM(iso){if(!iso)return '';const d=new Date(iso+'T00:00:00');return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`;}
+function csvColor(c){return c||'var(--dim)';}
+
+/* ─── Pareto (yatay bar) ─── */
+function paretoChart(container, items){
+  clear(container);
+  if(!items.length){emptyMsg(container);return;}
+  const W=820, rowH=34, padT=8, padB=8, labelW=150, valW=120;
+  const H=padT+items.length*rowH+padB;
+  const barX=labelW, barW=W-labelW-valW;
+  const max=Math.max(...items.map(i=>i.total_sec),1);
+  const total=items.reduce((a,b)=>a+b.total_sec,0)||1;
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'xMidYMid meet'});
+  let cum=0;
+  items.forEach((it,i)=>{
+    const y=padT+i*rowH, bh=rowH-12, w=it.total_sec/max*barW;
+    cum+=it.total_sec;
+    // sebep adı
+    const nm=el('text',{x:labelW-8,y:y+bh/2+4,'text-anchor':'end','font-size':11,style:'fill:var(--text)'});
+    nm.textContent=it.reason_name.length>20?it.reason_name.slice(0,19)+'…':it.reason_name; svg.appendChild(nm);
+    // zemin
+    svg.appendChild(el('rect',{x:barX,y:y,width:barW,height:bh,fill:'#ffffff08',rx:4}));
+    // bar
+    svg.appendChild(el('rect',{x:barX,y:y,width:Math.max(w,1),height:bh,fill:csvColor(it.color_hex),rx:4}));
+    // değer + kümülatif %
+    const vt=el('text',{x:barX+barW+8,y:y+bh/2+4,'font-size':11,style:'fill:var(--dim);font-family:JetBrains Mono,monospace'});
+    vt.textContent=`${fmtDur(it.total_sec)} · ${(cum/total*100).toFixed(0)}%`; svg.appendChild(vt);
+  });
+  container.appendChild(svg);
+  // hover
+  const tip=document.createElement('div');tip.className='tip';container.appendChild(tip);
+  const ov=el('rect',{x:0,y:0,width:W,height:H,fill:'transparent',style:'pointer-events:all;cursor:crosshair'});
+  svg.appendChild(ov);
+  let hl=null;
+  function hide(){tip.style.display='none';if(hl){hl.remove();hl=null;}}
+  ov.addEventListener('mouseleave',hide);
+  ov.addEventListener('mousemove',e=>{
+    const rect=svg.getBoundingClientRect();
+    const vbY=(e.clientY-rect.top)/rect.height*H;
+    let idx=Math.floor((vbY-padT)/rowH);
+    if(idx<0||idx>=items.length){hide();return;}
+    const it=items[idx], y=padT+idx*rowH;
+    if(hl)hl.remove();
+    hl=el('rect',{x:0,y:y-2,width:W,height:rowH-8,fill:'#ffffff0a',style:'pointer-events:none'});
+    svg.insertBefore(hl,ov);
+    tip.innerHTML=`<div class="th">${it.reason_name}</div>`+
+      `<div class="tr"><i style="background:${csvColor(it.color_hex)}"></i>Toplam ${fmtDur(it.total_sec)}</div>`+
+      `<div class="tr"><i style="background:var(--amber)"></i>Adet ${it.count}</div>`+
+      `<div class="tr"><i style="background:var(--cyan)"></i>Ortalama ${fmtDur(it.avg_sec)}</div>`;
+    tip.style.display='block'; tipPosition(tip,container,e);
+  });
+}
+
+/* ─── Donut (planlı/plansız) ─── */
+function donutChart(container, segments, centerLabel){
+  clear(container);
+  const total=segments.reduce((a,s)=>a+s.value,0);
+  if(total<=0){emptyMsg(container);return;}
+  const W=820,H=300,cx=W/2,cy=H/2,R=95,th=34;
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'xMidYMid meet'});
+  let a0=-Math.PI/2;
+  const arcs=[];
+  segments.forEach(s=>{
+    const frac=s.value/total, a1=a0+frac*2*Math.PI;
+    const large=(a1-a0)>Math.PI?1:0;
+    const x0=cx+R*Math.cos(a0),y0=cy+R*Math.sin(a0),x1=cx+R*Math.cos(a1),y1=cy+R*Math.sin(a1);
+    const p=el('path',{d:`M${x0.toFixed(1)},${y0.toFixed(1)} A${R},${R} 0 ${large} 1 ${x1.toFixed(1)},${y1.toFixed(1)}`,
+      fill:'none',stroke:s.color,'stroke-width':th,'stroke-linecap':'butt'});
+    svg.appendChild(p); arcs.push({s,a0,a1,p}); a0=a1;
+  });
+  const ct=el('text',{x:cx,y:cy-4,'text-anchor':'middle','font-size':24,style:'fill:var(--text);font-family:JetBrains Mono,monospace;font-weight:700'});
+  ct.textContent=fmtDur(total); svg.appendChild(ct);
+  const cl=el('text',{x:cx,y:cy+18,'text-anchor':'middle','font-size':10,style:'fill:var(--dim);letter-spacing:1px'});
+  cl.textContent=centerLabel||'TOPLAM'; svg.appendChild(cl);
+  container.appendChild(svg);
+  const lg=document.createElement('div');lg.className='legend';
+  segments.forEach(s=>{const sp=document.createElement('span');sp.innerHTML=`<i style="background:${s.color}"></i>${s.name} — ${fmtDur(s.value)} (%${(s.value/total*100).toFixed(0)})`;lg.appendChild(sp);});
+  container.appendChild(lg);
+  // hover
+  const tip=document.createElement('div');tip.className='tip';container.appendChild(tip);
+  arcs.forEach(o=>{
+    o.p.style.cursor='pointer';
+    o.p.addEventListener('mousemove',e=>{
+      o.p.setAttribute('stroke-width',th+6);
+      tip.innerHTML=`<div class="tr"><i style="background:${o.s.color}"></i>${o.s.name} ${fmtDur(o.s.value)} (%${(o.s.value/total*100).toFixed(0)})</div>`;
+      tip.style.display='block'; tipPosition(tip,container,e);
+    });
+    o.p.addEventListener('mouseleave',()=>{o.p.setAttribute('stroke-width',th);tip.style.display='none';});
+  });
+}
+
+/* ─── Günlük yığılmış (sebep bazlı) ─── */
+function dailyStackChart(container, days, meta){
+  clear(container);
+  if(!days.length){emptyMsg(container);return;}
+  const W=820,H=300,P={l:50,r:14,t:14,b:42};
+  const innerW=W-P.l-P.r,innerH=H-P.t-P.b;
+  const yMax=Math.max(...days.map(d=>d.total),1)*1.15;
+  const sy=v=>P.t+(1-v/yMax)*innerH;
+  const n=days.length,slot=innerW/n,bw=Math.min(slot*0.6,46);
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'xMidYMid meet'});
+  for(let i=0;i<=4;i++){const v=yMax*i/4,y=sy(v);svg.appendChild(el('line',{x1:P.l,y1:y,x2:W-P.r,y2:y,stroke:'#1e293b','stroke-width':1}));
+    const t=el('text',{x:P.l-6,y:y+3,'text-anchor':'end','font-size':9,style:'fill:var(--dim);font-family:JetBrains Mono,monospace'});t.textContent=Math.round(v/60)+'dk';svg.appendChild(t);}
+  const lblStep=n>16?Math.ceil(n/16):1;
+  days.forEach((d,i)=>{
+    const cx=P.l+slot*i+slot/2, x=cx-bw/2; let acc=0;
+    d.segs.forEach(sg=>{
+      const h=(sg.sec/yMax)*innerH;
+      svg.appendChild(el('rect',{x:x,y:sy(acc+sg.sec),width:bw,height:Math.max(h,0),fill:sg.color}));
+      acc+=sg.sec;
+    });
+    if(i%lblStep===0){const lt=el('text',{x:cx,y:H-P.b+16,'text-anchor':'middle','font-size':9,style:'fill:var(--dim);font-family:JetBrains Mono,monospace'});lt.textContent=fmtDM(d.date);svg.appendChild(lt);}
+  });
+  container.appendChild(svg);
+  // hover
+  const tip=document.createElement('div');tip.className='tip';container.appendChild(tip);
+  const ov=el('rect',{x:P.l,y:P.t,width:innerW,height:innerH,fill:'transparent',style:'pointer-events:all;cursor:crosshair'});
+  svg.appendChild(ov);
+  let hl=null;function hide(){tip.style.display='none';if(hl){hl.remove();hl=null;}}
+  ov.addEventListener('mouseleave',hide);
+  ov.addEventListener('mousemove',e=>{
+    const rect=svg.getBoundingClientRect();const vbX=(e.clientX-rect.left)/rect.width*W;
+    let idx=Math.floor((vbX-P.l)/slot);if(idx<0)idx=0;if(idx>=n)idx=n-1;
+    const d=days[idx],cx=P.l+slot*idx+slot/2;
+    if(hl)hl.remove();hl=el('rect',{x:cx-bw/2-2,y:P.t,width:bw+4,height:innerH,fill:'#ffffff10',style:'pointer-events:none'});svg.insertBefore(hl,ov);
+    let rows=`<div class="th">${fmtDM(d.date)} — ${fmtDur(d.total)}</div>`;
+    d.segs.slice().sort((a,b)=>b.sec-a.sec).forEach(sg=>{rows+=`<div class="tr"><i style="background:${sg.color}"></i>${sg.name} ${fmtDur(sg.sec)}</div>`;});
+    tip.innerHTML=rows;tip.style.display='block';tipPosition(tip,container,e);
+  });
+}
+
+/* ─── spec/modal ─── */
+const specs={};
+function openModal(key){const s=specs[key];if(!s)return;document.getElementById('modalTitle').textContent=s.title;clear(document.getElementById('modalBody'));s.render(document.getElementById('modalBody'));document.getElementById('modal').classList.add('open');}
+function closeModal(){document.getElementById('modal').classList.remove('open');}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
+document.querySelectorAll('.chart-card').forEach(c=>c.addEventListener('click',()=>openModal(c.dataset.chart)));
+
+/* ─── veri ─── */
+const params=new URLSearchParams(location.search);
+const urlDate=params.get('date');
+const urlShift=params.get('shift');
+const lineId=params.get('line_id')||1;
+const urlProduced=params.get('produced');
+const urlScrap=params.get('scrap');
+let rangeDays=15;
+let inclShiftEnd=false;
+let lastData=null;
+const SHIFT_LABEL={vardiya_1:'1. Vardiya',vardiya_2:'2. Vardiya',vardiya_3:'3. Vardiya'};
+
+function dateNDaysAgo(n){const d=new Date();d.setDate(d.getDate()-n);return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);}
+function todayLocal(){const n=new Date();return new Date(n.getTime()-n.getTimezoneOffset()*60000).toISOString().slice(0,10);}
+
+async function load(){
+  let qs=`line_id=${lineId}`;
+  if(urlDate){
+    qs+=`&date_from=${urlDate}&date_to=${urlDate}`;
+    if(urlShift) qs+=`&shift=${urlShift}`;
+    document.getElementById('sub').textContent=`${fmtDM(urlDate)} · ${SHIFT_LABEL[urlShift]||urlShift||'Tüm vardiyalar'}`;
+    document.getElementById('rangeSeg').parentElement.style.display='none';
+  }else{
+    qs+=`&date_from=${dateNDaysAgo(rangeDays)}&date_to=${todayLocal()}`;
+    document.getElementById('sub').textContent=`Son ${rangeDays} gün`;
+  }
+  try{
+    const r=await fetch(`${API}/api/v1/downtimes/analysis?${qs}`);
+    if(!r.ok){emptyMsg(document.getElementById('paretoChart'),'Veri alınamadı (endpoint ekli mi?)');return;}
+    lastData=await r.json();
+    render();
+  }catch(e){emptyMsg(document.getElementById('paretoChart'),'Hata: '+e.message);}
+}
+
+function render(){
+  const d=lastData; if(!d)return;
+  const skip=c=>(!inclShiftEnd && c==='VARDIYA_SONU');
+
+  // sebepler (filtreli)
+  const reasons=d.reasons.filter(r=>!skip(r.reason_code));
+  const totalSec=reasons.reduce((a,r)=>a+r.total_sec,0);
+  const totalCnt=reasons.reduce((a,r)=>a+r.count,0);
+  const plannedSec=reasons.filter(r=>r.category==='planned').reduce((a,r)=>a+r.total_sec,0);
+  const unplannedSec=totalSec-plannedSec;
+
+  // KPI
+  document.getElementById('kTotal').textContent=fmtDur(totalSec);
+  document.getElementById('kCount').textContent=totalCnt;
+  document.getElementById('kUnplanned').textContent=totalSec>0?`%${(unplannedSec/totalSec*100).toFixed(0)}`:'—';
+  document.getElementById('kTop').textContent=reasons.length?reasons[0].reason_name:'—';
+
+  // Pareto
+  specs.pareto={title:'Sebep Bazlı Duruş Süresi (Pareto)',render:c=>paretoChart(c,reasons)};
+  paretoChart(document.getElementById('paretoChart'),reasons);
+
+  // Donut
+  const donutSegs=[
+    {name:'Plansız',value:unplannedSec,color:'var(--red)'},
+    {name:'Planlı',value:plannedSec,color:'var(--blue)'},
+  ].filter(s=>s.value>0);
+  specs.donut={title:'Planlı / Plansız',render:c=>donutChart(c,donutSegs,'TOPLAM')};
+  donutChart(document.getElementById('donutChart'),donutSegs,'TOPLAM');
+
+  // Günlük yığılmış
+  const days=d.daily.map(day=>{
+    const segs=Object.keys(day.reasons)
+      .filter(code=>!skip(code))
+      .map(code=>({name:(d.reason_meta[code]||{}).name||code,color:(d.reason_meta[code]||{}).color||'var(--dim)',sec:day.reasons[code]}))
+      .filter(s=>s.sec>0);
+    return {date:day.date,segs,total:segs.reduce((a,s)=>a+s.sec,0)};
+  }).filter(day=>day.total>0);
+  specs.daily={title:'Günlük Duruş Trendi',render:c=>dailyStackChart(c,days,d.reason_meta)};
+  dailyStackChart(document.getElementById('dailyChart'),days,d.reason_meta);
+
+  // Tablo
+  const tb=document.getElementById('reasonTable');
+  if(!reasons.length){tb.innerHTML='<tr><td colspan="6" class="empty">Kayıt yok</td></tr>';}
+  else{
+    tb.innerHTML=reasons.map(r=>{
+      const share=totalSec>0?(r.total_sec/totalSec*100).toFixed(1):'0';
+      const tur=r.category==='planned'?'Planlı':'Plansız';
+      return `<tr>
+        <td><span class="dotc" style="background:${csvColor(r.color_hex)}"></span>${r.reason_name}</td>
+        <td style="color:var(--dim)">${tur}</td>
+        <td class="mono">${r.count}</td>
+        <td class="mono">${fmtDur(r.total_sec)}</td>
+        <td class="mono" style="color:var(--dim)">${fmtDur(r.avg_sec)}</td>
+        <td class="mono">%${share}</td>
+      </tr>`;
+    }).join('');
+  }
+}
+
+document.getElementById('rangeSeg').addEventListener('click',e=>{
+  if(e.target.tagName!=='BUTTON')return;
+  document.querySelectorAll('#rangeSeg button').forEach(b=>b.classList.remove('on'));
+  e.target.classList.add('on');rangeDays=+e.target.dataset.d;load();
+});
+document.getElementById('inclShiftEnd').addEventListener('change',e=>{inclShiftEnd=e.target.checked;render();renderTimeline();});
+
+/* ─── Duruş zaman çizelgesi (tek satır Gantt) ─── */
+function timelineChart(container, events){
+  clear(container);
+  if(!events.length){emptyMsg(container,'Bu gün duruş kaydı yok');return;}
+  const W=820, P={l:14,r:14,t:14,b:14}, trackH=46, H=110;
+  const innerW=W-P.l-P.r, HOUR=3600000;
+  const starts=events.map(e=>new Date(e.started_at).getTime());
+  const ends=events.map(e=>new Date(e.ended_at).getTime());
+  let tMin=Math.floor(Math.min(...starts)/HOUR)*HOUR;
+  let tMax=Math.ceil(Math.max(...ends)/HOUR)*HOUR;
+  if(tMax<=tMin) tMax=tMin+HOUR;
+  const span=tMax-tMin, sx=t=>P.l+(t-tMin)/span*innerW;
+
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'xMidYMid meet'});
+
+  // saat çizgileri (çok saat varsa seyrelt)
+  const hrs=Math.round(span/HOUR), step=hrs>14?Math.ceil(hrs/14):1;
+  let hi=0;
+  for(let t=tMin;t<=tMax;t+=HOUR,hi++){
+    const x=sx(t);
+    svg.appendChild(el('line',{x1:x,y1:P.t,x2:x,y2:P.t+trackH+8,stroke:'#1e293b','stroke-width':1}));
+    if(hi%step===0){
+      const lt=el('text',{x:x,y:P.t+trackH+24,'text-anchor':'middle','font-size':9,style:'fill:var(--dim);font-family:JetBrains Mono,monospace'});
+      lt.textContent=new Date(t).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'});
+      svg.appendChild(lt);
+    }
+  }
+  // track zemini
+  svg.appendChild(el('rect',{x:P.l,y:P.t,width:innerW,height:trackH,fill:'#ffffff05',rx:6}));
+  // barlar
+  const bars=[];
+  events.forEach(ev=>{
+    const x0=sx(new Date(ev.started_at).getTime());
+    const w=Math.max(sx(new Date(ev.ended_at).getTime())-x0,2);
+    const r=el('rect',{x:x0,y:P.t+4,width:w,height:trackH-8,fill:csvColor(ev.color_hex),rx:3,style:'cursor:pointer'});
+    if(ev.is_active) r.setAttribute('opacity','0.65');
+    svg.appendChild(r); bars.push({ev,r});
+  });
+  container.appendChild(svg);
+
+  // hover
+  const tip=document.createElement('div');tip.className='tip';container.appendChild(tip);
+  bars.forEach(o=>{
+    o.r.addEventListener('mousemove',e=>{
+      o.r.setAttribute('stroke','#ffffff');o.r.setAttribute('stroke-width','1.5');
+      const s=new Date(o.ev.started_at).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'});
+      const en=o.ev.is_active?'devam ediyor':new Date(o.ev.ended_at).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'});
+      const cat=o.ev.category==='planned'?'Planlı':'Plansız';
+      tip.innerHTML=`<div class="th">${o.ev.reason_name} · ${cat}</div>`+
+        `<div class="tr"><i style="background:${csvColor(o.ev.color_hex)}"></i>${s} → ${en}</div>`+
+        `<div class="tr"><i style="background:var(--cyan)"></i>${fmtDur(o.ev.duration_sec)}</div>`;
+      tip.style.display='block';tipPosition(tip,container,e);
+    });
+    o.r.addEventListener('mouseleave',()=>{o.r.removeAttribute('stroke');tip.style.display='none';});
+  });
+}
+
+let timelineEvents=[];
+function renderTimeline(){
+  if(!urlDate) return;
+  const events=timelineEvents.filter(e=>!(!inclShiftEnd && e.reason_code==='VARDIYA_SONU'));
+  specs.timeline={title:'Duruş Zaman Çizelgesi',render:c=>timelineChart(c,events)};
+  timelineChart(document.getElementById('timelineChart'),events);
+}
+async function fetchTimeline(){
+  if(!urlDate) return;
+  document.getElementById('timelineCard').style.display='block';
+  document.getElementById('tlSub').textContent=`${fmtDM(urlDate)} · ${SHIFT_LABEL[urlShift]||urlShift||'Tüm vardiyalar'}`;
+  try{
+    let q=`line_id=${lineId}&date_from=${urlDate}&date_to=${urlDate}`;
+    if(urlShift) q+=`&shift=${urlShift}`;
+    const r=await fetch(`${API}/api/v1/downtimes/timeline?${q}`);
+    if(!r.ok){emptyMsg(document.getElementById('timelineChart'),'Veri alınamadı (endpoint ekli mi?)');return;}
+    const d=await r.json();
+    timelineEvents=d.events||[];
+    renderTimeline();
+  }catch(e){emptyMsg(document.getElementById('timelineChart'),'Hata: '+e.message);}
+}
+fetchTimeline();
+
+async function fetchQuality(){
+  if(!urlDate) return;
+  document.getElementById('qualityCard').style.display='block';
+  document.getElementById('qSub').textContent=`${fmtDM(urlDate)} · ${SHIFT_LABEL[urlShift]||urlShift||'Tüm vardiyalar'}`;
+
+  // Üretim + fire: URL'den geldiyse onu kullan, yoksa vardiya özetinden çek
+  let produced = urlProduced!=null ? +urlProduced : 0;
+  let scrapTotal = urlScrap!=null ? +urlScrap : 0;
+  if(urlProduced==null){
+    try{
+      const daysBack=Math.ceil((new Date(todayLocal())-new Date(urlDate))/86400000)+2;
+      const r=await fetch(`${API}/api/v1/production/shifts?line_id=${lineId}&days=${Math.max(daysBack,2)}`);
+      if(r.ok){const arr=await r.json();
+        arr.forEach(s=>{ if(s.shift_date===urlDate && (!urlShift||s.shift===urlShift)){ produced+=s.total_produced||0; scrapTotal+=s.total_scrap||0; } });
+      }
+    }catch(e){}
+  }
+
+  // Sebep kırılımı
+  let reasons=[];
+  try{
+    let q=`line_id=${lineId}&date_from=${urlDate}&date_to=${urlDate}`;
+    if(urlShift) q+=`&shift=${urlShift}`;
+    const r=await fetch(`${API}/api/v1/scrap/analysis?${q}`);
+    if(r.ok){const sd=await r.json(); reasons=(sd.reasons||[]).slice().sort((a,b)=>b.qty-a.qty);}
+  }catch(e){}
+
+  const scrapQty = reasons.length ? reasons.reduce((a,x)=>a+(x.qty||0),0) : scrapTotal;
+  document.getElementById('qProd').textContent = produced || '—';
+  document.getElementById('qScrap').textContent = scrapQty || 0;
+  document.getElementById('qRate').textContent = produced>0 ? `%${(scrapQty/produced*100).toFixed(2)}` : '—';
+  document.getElementById('qTop').textContent = reasons.length ? reasons[0].reason_name : '—';
+
+  const tb=document.getElementById('qScrapTable');
+  if(!reasons.length){tb.innerHTML='<tr><td colspan="3" class="empty">Bu gün fire kaydı yok</td></tr>';}
+  else{
+    tb.innerHTML=reasons.map(r=>{
+      const share=scrapQty>0?(r.qty/scrapQty*100).toFixed(1):'0';
+      return `<tr><td><span class="dotc" style="background:${csvColor(r.color_hex)}"></span>${r.reason_name}</td><td class="mono">${r.qty}</td><td class="mono">%${share}</td></tr>`;
+    }).join('');
+  }
+}
+
+load();
+fetchQuality();
+</script>
+</body>
+</html>

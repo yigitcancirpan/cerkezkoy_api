@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Yönetim Paneli — Fabrika IoT</title>
+<style>
+  :root{
+    --bg:#0a0e17; --panel:#121a2b; --panel2:#0f1626; --border:#1f2a3f;
+    --text:#e2e8f0; --muted:#7c8aa3; --accent:#3b82f6; --accent2:#2563eb;
+    --ok:#22c55e; --warn:#f59e0b; --danger:#ef4444; --lock:#64748b;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:'DM Sans',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    font-size:14px;
+  }
+  header{
+    padding:18px 24px; border-bottom:1px solid var(--border);
+    display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+  }
+  header h1{font-size:18px; margin:0; font-weight:600}
+  header .sub{color:var(--muted); font-size:12px}
+  .tabs{display:flex; gap:6px; padding:14px 24px 0; flex-wrap:wrap}
+  .tab{
+    padding:9px 16px; border:1px solid var(--border); border-bottom:none;
+    background:var(--panel2); color:var(--muted); cursor:pointer;
+    border-radius:8px 8px 0 0; font-size:13px; font-weight:500;
+  }
+  .tab.active{background:var(--panel); color:var(--text); border-color:var(--border)}
+  .wrap{padding:0 24px 60px}
+  .section{display:none; background:var(--panel); border:1px solid var(--border);
+    border-radius:0 10px 10px 10px; padding:20px}
+  .section.active{display:block}
+  .row-between{display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px}
+  .row-between h2{font-size:15px; margin:0; font-weight:600}
+  button.btn{
+    background:var(--accent); color:#fff; border:none; padding:9px 15px;
+    border-radius:7px; cursor:pointer; font-size:13px; font-weight:500;
+    font-family:inherit;
+  }
+  button.btn:hover{background:var(--accent2)}
+  button.ghost{background:transparent; border:1px solid var(--border); color:var(--text)}
+  button.ghost:hover{border-color:var(--accent)}
+  button.danger{background:var(--danger)}
+  button.sm{padding:6px 11px; font-size:12px}
+
+  table{width:100%; border-collapse:collapse}
+  th,td{text-align:left; padding:11px 10px; border-bottom:1px solid var(--border); font-size:13px}
+  th{color:var(--muted); font-weight:500; font-size:11px; text-transform:uppercase; letter-spacing:.04em}
+  tr:hover td{background:rgba(59,130,246,.04)}
+  .code{font-family:ui-monospace,Menlo,monospace; font-size:12px; color:var(--muted)}
+  .swatch{display:inline-block; width:14px; height:14px; border-radius:3px; vertical-align:middle; margin-right:7px; border:1px solid rgba(255,255,255,.15)}
+  .pill{display:inline-block; padding:2px 9px; border-radius:20px; font-size:11px; font-weight:500}
+  .pill.on{background:rgba(34,197,94,.15); color:var(--ok)}
+  .pill.off{background:rgba(124,138,163,.15); color:var(--muted)}
+  .pill.cat{background:rgba(59,130,246,.12); color:#93c5fd}
+  .lockicon{color:var(--lock); font-size:11px; margin-left:6px}
+
+  input,select,textarea{
+    background:var(--panel2); border:1px solid var(--border); color:var(--text);
+    padding:9px 11px; border-radius:7px; font-size:13px; font-family:inherit; width:100%;
+  }
+  input[type=color]{padding:3px; height:38px; cursor:pointer}
+  input:focus,select:focus,textarea:focus{outline:none; border-color:var(--accent)}
+  label{display:block; color:var(--muted); font-size:12px; margin-bottom:5px}
+  .field{margin-bottom:13px}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:13px}
+  .grid4{display:grid; grid-template-columns:repeat(4,1fr); gap:13px}
+
+  /* modal */
+  .overlay{position:fixed; inset:0; background:rgba(0,0,0,.6); display:none;
+    align-items:center; justify-content:center; z-index:50; padding:20px}
+  .overlay.show{display:flex}
+  .modal{background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:22px; width:100%; max-width:460px; max-height:90vh; overflow:auto}
+  .modal h3{margin:0 0 16px; font-size:16px}
+  .modal-actions{display:flex; justify-content:flex-end; gap:9px; margin-top:18px}
+
+  /* records */
+  .rec{display:grid; grid-template-columns:1fr auto; gap:12px; align-items:center;
+    padding:12px 14px; border:1px solid var(--border); border-radius:9px; margin-bottom:9px; background:var(--panel2)}
+  .rec .meta{font-size:12px; color:var(--muted); margin-top:3px}
+  .rec .ctrls{display:flex; gap:8px; align-items:center}
+  .rec .ctrls select{width:auto; min-width:150px}
+  .badge-active{background:rgba(245,158,11,.15); color:var(--warn); padding:2px 8px; border-radius:6px; font-size:11px; margin-left:8px}
+
+  /* press cards */
+  .press-card{border:1px solid var(--border); border-radius:10px; padding:16px; background:var(--panel2); margin-bottom:14px}
+  .press-card h4{margin:0 0 13px; font-size:14px}
+
+  #toast{position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+    background:var(--panel); border:1px solid var(--border); padding:12px 20px;
+    border-radius:9px; font-size:13px; opacity:0; transition:opacity .25s; z-index:80; pointer-events:none}
+  #toast.show{opacity:1}
+  #toast.ok{border-color:var(--ok)} #toast.err{border-color:var(--danger)}
+  .hint{color:var(--muted); font-size:12px; line-height:1.5; margin:0 0 14px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Yönetim Paneli</h1>
+  <span class="sub">Qs Hattı · Fabrika IoT</span>
+</header>
+
+<div class="tabs">
+  <div class="tab active" data-tab="dt">Duruş Sebepleri</div>
+  <div class="tab" data-tab="scrap">Fire Sebepleri</div>
+  <div class="tab" data-tab="records">Duruş Kayıtları</div>
+  <div class="tab" data-tab="settings">Ayarlar</div>
+</div>
+
+<div class="wrap">
+  <!-- ── DURUŞ SEBEPLERİ ── -->
+  <div class="section active" id="sec-dt">
+    <div class="row-between">
+      <h2>Duruş Sebepleri</h2>
+      <button class="btn" onclick="openReason('downtime')">+ Yeni Sebep</button>
+    </div>
+    <p class="hint">Görünen ad serbestçe değiştirilebilir. Kilitli (🔒) sebepler sistem tarafından kullanıldığı için pasifleştirilemez; kodları hiçbir sebep için değiştirilemez.</p>
+    <table><thead><tr>
+      <th>Sebep</th><th>Kod</th><th>Kategori</th><th>Sıra</th><th>Durum</th><th></th>
+    </tr></thead><tbody id="dt-rows"></tbody></table>
+  </div>
+
+  <!-- ── FİRE SEBEPLERİ ── -->
+  <div class="section" id="sec-scrap">
+    <div class="row-between">
+      <h2>Fire / Hurda Sebepleri</h2>
+      <button class="btn" onclick="openReason('scrap')">+ Yeni Sebep</button>
+    </div>
+    <table><thead><tr>
+      <th>Sebep</th><th>Kod</th><th>Kategori</th><th>Sıra</th><th>Durum</th><th></th>
+    </tr></thead><tbody id="scrap-rows"></tbody></table>
+  </div>
+
+  <!-- ── DURUŞ KAYITLARI ── -->
+  <div class="section" id="sec-records">
+    <div class="row-between">
+      <h2>Son Duruş Kayıtları <span class="sub" style="color:var(--muted)">(son 7 gün)</span></h2>
+      <button class="btn" onclick="openManual()">+ Manuel Duruş Ekle</button>
+    </div>
+    <p class="hint">Yanlış açılmış otomatik duruşların sebebini değiştir veya kaydı sil. Test sırasında biriken sahte duruşları buradan temizleyebilirsin.</p>
+    <div id="records-list"></div>
+  </div>
+
+  <!-- ── AYARLAR ── -->
+  <div class="section" id="sec-settings">
+    <h2 style="margin:0 0 14px; font-size:15px">OEE Hedefi</h2>
+    <p class="hint">Operatör-beslemeli pres hattı için gerçekçi yakın hedef ~%65-70. Dashboard'da gösterge çizgisi olarak kullanılabilir.</p>
+    <div style="display:flex; gap:10px; align-items:flex-end; max-width:340px; margin-bottom:28px">
+      <div style="flex:1"><label>Hedef OEE (%)</label><input type="number" id="oee-target" min="0" max="100" step="1"></div>
+      <button class="btn" onclick="saveOee()">Kaydet</button>
+    </div>
+
+    <h2 style="margin:0 0 14px; font-size:15px">Yağ Alarm Eşikleri</h2>
+    <p class="hint">Pres bazında seviye (%) ve sıcaklık (°C) min/max sınırları. Yağ dashboard'ı bunları alarm eşiği olarak kullanacak.</p>
+    <div id="oil-cards"></div>
+  </div>
+</div>
+
+<!-- ── SEBEP MODALI ── -->
+<div class="overlay" id="reason-modal">
+  <div class="modal">
+    <h3 id="reason-title">Sebep</h3>
+    <input type="hidden" id="r-id"><input type="hidden" id="r-type">
+    <div class="field">
+      <label>Görünen Ad</label>
+      <input id="r-name" placeholder="ör. Kalıp Değişimi">
+    </div>
+    <div class="field">
+      <label>Kod <span id="r-code-note" style="color:var(--lock)"></span></label>
+      <input id="r-code" placeholder="ör. KALIP_DEGISIM" class="code">
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Kategori</label><select id="r-cat"></select></div>
+      <div class="field"><label>Sıra</label><input type="number" id="r-order" value="0"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Renk</label><input type="color" id="r-color" value="#ef4444"></div>
+      <div class="field"><label>Aktif</label>
+        <select id="r-active"><option value="true">Aktif</option><option value="false">Pasif</option></select>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeModal('reason-modal')">İptal</button>
+      <button class="btn" onclick="saveReason()">Kaydet</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── MANUEL DURUŞ MODALI ── -->
+<div class="overlay" id="manual-modal">
+  <div class="modal">
+    <h3>Manuel Duruş Ekle</h3>
+    <div class="field"><label>Sebep</label><select id="m-reason"></select></div>
+    <div class="grid2">
+      <div class="field"><label>Başlangıç</label><input type="datetime-local" id="m-start"></div>
+      <div class="field"><label>Bitiş <span style="color:var(--muted)">(boşsa aktif)</span></label><input type="datetime-local" id="m-end"></div>
+    </div>
+    <div class="field"><label>Operatör (opsiyonel)</label><input id="m-op"></div>
+    <div class="field"><label>Not (opsiyonel)</label><textarea id="m-note" rows="2"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeModal('manual-modal')">İptal</button>
+      <button class="btn" onclick="saveManual()">Ekle</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const API = window.location.origin;
+const LINE = 1;
+const CAT_OPTS = {
+  downtime: [['planned','Planlı'],['unplanned','Plansız']],
+  scrap: [['quality','Kalite'],['setup','Ayar'],['material','Malzeme'],['other','Diğer']],
+};
+const PREFIX = {downtime:'downtimes', scrap:'scrap'};
+let dtReasons = [];   // aktif duruş sebepleri (kayıt düzenleme dropdownu için)
+
+// ── helpers ──
+async function api(method, path, body){
+  const opt = {method, headers:{'Content-Type':'application/json'}};
+  if(body !== undefined) opt.body = JSON.stringify(body);
+  const r = await fetch(API + path, opt);
+  let data = null; try{ data = await r.json(); }catch(e){}
+  if(!r.ok) throw new Error((data && data.detail) || ('HTTP ' + r.status));
+  return data;
+}
+function toast(msg, ok=true){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'show ' + (ok ? 'ok' : 'err');
+  setTimeout(()=>{ t.className = ''; }, 2600);
+}
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function fmtDur(sec){
+  sec = Math.max(0, sec|0);
+  if(sec < 60) return sec + ' sn';
+  let m = Math.floor(sec/60), s = sec%60;
+  if(m < 60) return m + ' dk' + (s? ' ' + s + ' sn':'');
+  let h = Math.floor(m/60); m = m%60;
+  return h + ' sa ' + m + ' dk';
+}
+function fmtTime(iso){
+  if(!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString('tr-TR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+}
+function closeModal(id){ document.getElementById(id).classList.remove('show'); }
+function catLabel(type, code){
+  const o = CAT_OPTS[type].find(x=>x[0]===code);
+  return o ? o[1] : (code||'—');
+}
+
+// ── tabs ──
+document.querySelectorAll('.tab').forEach(t=>{
+  t.onclick = ()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.section').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+    const id = t.dataset.tab;
+    document.getElementById('sec-' + id).classList.add('active');
+    if(id==='records') loadRecords();
+    if(id==='settings') loadSettings();
+  };
+});
+
+// ── SEBEP LİSTELERİ ──
+async function loadReasons(type){
+  const data = await api('GET', `/api/v1/${PREFIX[type]}/reasons/manage`);
+  if(type==='downtime') dtReasons = data.filter(r=>r.is_active);
+  const tbody = document.getElementById(type==='downtime'?'dt-rows':'scrap-rows');
+  tbody.innerHTML = data.map(r=>`
+    <tr>
+      <td><span class="swatch" style="background:${esc(r.color_hex)}"></span>${esc(r.reason_name)}
+        ${r.protected?'<span class="lockicon">🔒</span>':''}</td>
+      <td class="code">${esc(r.reason_code)}</td>
+      <td><span class="pill cat">${esc(catLabel(type, r.category))}</span></td>
+      <td>${r.display_order}</td>
+      <td><span class="pill ${r.is_active?'on':'off'}">${r.is_active?'Aktif':'Pasif'}</span></td>
+      <td style="text-align:right">
+        <button class="btn ghost sm" onclick='openReason("${type}", ${JSON.stringify(r)})'>Düzenle</button>
+      </td>
+    </tr>`).join('');
+}
+
+function openReason(type, r){
+  document.getElementById('r-type').value = type;
+  document.getElementById('reason-title').textContent =
+    (r?'Sebep Düzenle':'Yeni Sebep') + (type==='scrap'?' — Fire':' — Duruş');
+  // kategori seçenekleri
+  const catSel = document.getElementById('r-cat');
+  catSel.innerHTML = CAT_OPTS[type].map(o=>`<option value="${o[0]}">${o[1]}</option>`).join('');
+
+  const codeInp = document.getElementById('r-code');
+  const codeNote = document.getElementById('r-code-note');
+  if(r){
+    document.getElementById('r-id').value = r.reason_id;
+    document.getElementById('r-name').value = r.reason_name;
+    codeInp.value = r.reason_code;
+    codeInp.readOnly = true;                       // mevcut kayıtta kod kilitli
+    codeNote.textContent = '(kayıt sonrası değiştirilemez)';
+    catSel.value = r.category;
+    document.getElementById('r-order').value = r.display_order;
+    document.getElementById('r-color').value = (r.color_hex||'#ef4444').slice(0,7);
+    const actSel = document.getElementById('r-active');
+    actSel.value = String(r.is_active);
+    actSel.disabled = !!r.protected;               // sistem sebebi pasifleştirilemez
+    actSel.title = r.protected ? 'Sistem sebebi — pasifleştirilemez' : '';
+  }else{
+    document.getElementById('r-id').value = '';
+    document.getElementById('r-name').value = '';
+    codeInp.value = ''; codeInp.readOnly = false; codeNote.textContent = '';
+    catSel.selectedIndex = 0;
+    document.getElementById('r-order').value = 0;
+    document.getElementById('r-color').value = '#ef4444';
+    const actSel = document.getElementById('r-active');
+    actSel.value = 'true'; actSel.disabled = false;
+  }
+  document.getElementById('reason-modal').classList.add('show');
+}
+
+async function saveReason(){
+  const type = document.getElementById('r-type').value;
+  const id = document.getElementById('r-id').value;
+  const name = document.getElementById('r-name').value.trim();
+  if(!name) return toast('Ad boş olamaz', false);
+  const payload = {
+    reason_name: name,
+    category: document.getElementById('r-cat').value,
+    color_hex: document.getElementById('r-color').value,
+    display_order: parseInt(document.getElementById('r-order').value)||0,
+    is_active: document.getElementById('r-active').value === 'true',
+  };
+  try{
+    if(id){
+      await api('PATCH', `/api/v1/${PREFIX[type]}/reasons/${id}`, payload);
+    }else{
+      const code = document.getElementById('r-code').value.trim();
+      if(!code) return toast('Yeni sebep için kod gerekli', false);
+      await api('POST', `/api/v1/${PREFIX[type]}/reasons`, {...payload, reason_code: code});
+    }
+    closeModal('reason-modal');
+    toast('Kaydedildi');
+    loadReasons(type);
+  }catch(e){ toast(e.message, false); }
+}
+
+// ── DURUŞ KAYITLARI ──
+async function loadRecords(){
+  if(!dtReasons.length) await loadReasons('downtime');
+  const from = new Date(Date.now() - 7*864e5).toISOString().slice(0,10);
+  const data = await api('GET', `/api/v1/downtimes/timeline?line_id=${LINE}&date_from=${from}`);
+  const events = (data.events||[]).slice().reverse();  // en yeni üstte
+  const opts = dtReasons.map(r=>`<option value="${r.reason_id}">${esc(r.reason_name)}</option>`).join('');
+  const list = document.getElementById('records-list');
+  if(!events.length){ list.innerHTML = '<p class="hint">Kayıt yok.</p>'; return; }
+  list.innerHTML = events.map(ev=>{
+    const curId = (dtReasons.find(r=>r.reason_code===ev.reason_code)||{}).reason_id || '';
+    return `<div class="rec">
+      <div>
+        <div><span class="swatch" style="background:${esc(ev.color_hex)}"></span>
+          <strong>${esc(ev.reason_name)}</strong>
+          ${ev.is_active?'<span class="badge-active">AKTİF</span>':''}</div>
+        <div class="meta">${fmtTime(ev.started_at)} → ${ev.is_active?'devam ediyor':fmtTime(ev.ended_at)}
+          · ${fmtDur(ev.duration_sec)} · ${esc(ev.shift||'')} · #${ev.downtime_id}</div>
+      </div>
+      <div class="ctrls">
+        <select onchange="changeReason(${ev.downtime_id}, this.value)">
+          <option value="">Sebep değiştir…</option>${opts}
+        </select>
+        <button class="btn danger sm" onclick="delRecord(${ev.downtime_id})">Sil</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+async function changeReason(id, reasonId){
+  if(!reasonId) return;
+  try{
+    await api('PATCH', `/api/v1/downtimes/${id}/reason?reason_id=${reasonId}`);
+    toast('Sebep güncellendi'); loadRecords();
+  }catch(e){ toast(e.message, false); }
+}
+async function delRecord(id){
+  if(!confirm(`#${id} numaralı duruş kaydı silinsin mi? Bu işlem geri alınamaz.`)) return;
+  try{ await api('DELETE', `/api/v1/downtimes/${id}`); toast('Silindi'); loadRecords(); }
+  catch(e){ toast(e.message, false); }
+}
+
+// ── MANUEL DURUŞ ──
+async function openManual(){
+  if(!dtReasons.length) await loadReasons('downtime');
+  document.getElementById('m-reason').innerHTML =
+    dtReasons.map(r=>`<option value="${r.reason_id}">${esc(r.reason_name)}</option>`).join('');
+  ['m-start','m-end','m-op','m-note'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('manual-modal').classList.add('show');
+}
+async function saveManual(){
+  const start = document.getElementById('m-start').value;
+  const end = document.getElementById('m-end').value;
+  if(!start) return toast('Başlangıç gerekli', false);
+  const body = {
+    line_id: LINE,
+    reason_id: parseInt(document.getElementById('m-reason').value),
+    started_at: new Date(start).toISOString(),       // tarayıcı yerel saati → UTC
+    ended_at: end ? new Date(end).toISOString() : null,
+    operator_name: document.getElementById('m-op').value || null,
+    notes: document.getElementById('m-note').value || null,
+  };
+  try{
+    await api('POST', '/api/v1/downtimes/manual', body);
+    closeModal('manual-modal'); toast('Manuel duruş eklendi'); loadRecords();
+  }catch(e){ toast(e.message, false); }
+}
+
+// ── AYARLAR ──
+async function loadSettings(){
+  try{
+    const s = await api('GET', '/api/v1/settings');
+    document.getElementById('oee-target').value = s.oee_target || '';
+  }catch(e){ toast(e.message, false); }
+  loadOil();
+}
+async function saveOee(){
+  const v = document.getElementById('oee-target').value;
+  try{ await api('PUT', '/api/v1/settings/oee_target', {value:String(v)}); toast('OEE hedefi kaydedildi'); }
+  catch(e){ toast(e.message, false); }
+}
+async function loadOil(){
+  const rows = await api('GET', '/api/v1/settings/oil-thresholds');
+  document.getElementById('oil-cards').innerHTML = rows.map(p=>`
+    <div class="press-card">
+      <h4>Pres ${p.press_id}</h4>
+      <div class="grid4">
+        <div><label>Seviye min (%)</label><input type="number" step="0.1" id="ol-${p.press_id}-lmin" value="${p.level_min ?? ''}"></div>
+        <div><label>Seviye max (%)</label><input type="number" step="0.1" id="ol-${p.press_id}-lmax" value="${p.level_max ?? ''}"></div>
+        <div><label>Sıcaklık min (°C)</label><input type="number" step="0.1" id="ol-${p.press_id}-tmin" value="${p.temp_min ?? ''}"></div>
+        <div><label>Sıcaklık max (°C)</label><input type="number" step="0.1" id="ol-${p.press_id}-tmax" value="${p.temp_max ?? ''}"></div>
+      </div>
+      <div style="margin-top:12px; text-align:right">
+        <button class="btn sm" onclick="saveOil(${p.press_id})">Pres ${p.press_id} Kaydet</button>
+      </div>
+    </div>`).join('');
+}
+async function saveOil(pid){
+  const num = id=>{ const v = document.getElementById(id).value; return v===''? null : parseFloat(v); };
+  const body = {
+    level_min:num(`ol-${pid}-lmin`), level_max:num(`ol-${pid}-lmax`),
+    temp_min:num(`ol-${pid}-tmin`),  temp_max:num(`ol-${pid}-tmax`),
+  };
+  try{ await api('PUT', `/api/v1/settings/oil-thresholds/${pid}`, body); toast(`Pres ${pid} eşikleri kaydedildi`); }
+  catch(e){ toast(e.message, false); }
+}
+
+// overlay tıklayınca kapat
+document.querySelectorAll('.overlay').forEach(o=>{
+  o.onclick = e=>{ if(e.target===o) o.classList.remove('show'); };
+});
+
+// ── başlangıç ──
+loadReasons('downtime');
+loadReasons('scrap');
+</script>
+</body>
+</html>

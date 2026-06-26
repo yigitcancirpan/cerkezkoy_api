@@ -1,0 +1,23 @@
+                        List of relations
+ Schema |          Name           |       Type        |  Owner   
+--------+-------------------------+-------------------+----------
+ public | alerts                  | table             | postgres
+ public | batch_transfers         | table             | postgres
+ public | downtime_reasons        | table             | postgres
+ public | downtimes               | table             | postgres
+ public | machines                | table             | postgres
+ public | press_oil               | table             | postgres
+ public | press_oil_current       | table             | postgres
+ public | production_current      | table             | postgres
+ public | production_lines        | table             | postgres
+ public | production_log          | table             | postgres
+ public | sensor_hourly_summary   | table             | postgres
+ public | sensor_readings         | partitioned table | postgres
+ public | sensor_readings_2026_03 | table             | postgres
+ public | sensor_readings_2026_04 | table             | postgres
+ public | sensor_readings_2026_05 | table             | postgres
+ public | sensor_readings_2026_06 | table             | postgres
+ public | sensors                 | table             | postgres
+ public | shift_summary           | table             | postgres
+(18 rows)
+

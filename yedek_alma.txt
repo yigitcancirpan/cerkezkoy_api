@@ -1,0 +1,11 @@
+# 1. Script'i çalıştır
+/home/server/backup_db.sh
+
+# 2. Log'u gör
+tail -5 /home/server/logs/backup.log
+
+# 3. Yedek dosyalarını gör
+ls -lh /backup/postgres/
+
+# 4. Cron'a son bir bakış (yolların doğru olduğundan emin ol)
+crontab -l

@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Üretim Dashboard — Fabrika IoT</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=DM+Sans:wght@400;500;700;900&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box;}
+  :root{--bg:#0a0e17;--card:#111827;--card2:#1a2035;--border:#1e293b;--text:#e2e8f0;--dim:#64748b;--green:#10b981;--blue:#3b82f6;--red:#ef4444;--amber:#f59e0b;--purple:#8b5cf6;--cyan:#06b6d4;}
+  body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min-height:100vh;padding:16px;}
+
+  .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
+  .top h1{font-size:18px;font-weight:900;}
+  .top h1 span{color:var(--green);}
+  .top-right{display:flex;gap:8px;align-items:center;}
+  .badge{padding:4px 10px;border-radius:6px;font-size:10px;font-weight:700;}
+  .clock{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--dim);}
+  .status{display:flex;align-items:center;gap:5px;}
+  .dot{width:8px;height:8px;border-radius:50%;}
+  .dot-green{background:var(--green);box-shadow:0 0 8px var(--green);}
+  .dot-red{background:var(--red);box-shadow:0 0 8px var(--red);animation:pulse 1.5s infinite;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+
+  .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;}
+  .grid3{display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;margin-bottom:12px;}
+  @media(max-width:900px){.grid4,.grid3{grid-template-columns:repeat(2,1fr);}.grid2{grid-template-columns:1fr;}}
+
+  .card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;}
+  .card-label{font-size:9px;letter-spacing:1.5px;color:var(--dim);text-transform:uppercase;margin-bottom:4px;}
+  .card-value{font-family:'JetBrains Mono',monospace;font-size:32px;font-weight:700;line-height:1;}
+  .card-sub{font-size:11px;color:var(--dim);margin-top:3px;}
+
+  .progress-bar{height:14px;background:var(--card2);border-radius:7px;overflow:hidden;margin-top:6px;}
+  .progress-fill{height:100%;border-radius:7px;transition:width 1s;}
+
+  /* ETA KART */
+  .eta-card{background:linear-gradient(135deg,#1a2035,#1e293b);border:1px solid var(--cyan);border-radius:10px;padding:14px;}
+  .eta-time{font-family:'JetBrains Mono',monospace;font-size:36px;font-weight:700;color:var(--cyan);}
+  .eta-detail{font-size:11px;color:var(--dim);margin-top:4px;}
+
+  /* ÖZET BUTONU */
+  .summary-btn{
+    width:100%;padding:12px;border:none;border-radius:10px;
+    background:linear-gradient(135deg,var(--blue),var(--purple));
+    color:white;font-size:14px;font-weight:700;cursor:pointer;
+    font-family:'DM Sans',sans-serif;transition:opacity 0.2s;
+  }
+  .summary-btn:hover{opacity:0.9;}
+  .summary-btn:active{opacity:0.7;}
+  .summary-btn:disabled{opacity:0.4;cursor:not-allowed;}
+
+  /* ÖZET SONUÇ */
+  .summary-result{display:none;margin-top:10px;}
+  .oee-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px;}
+  .oee-item{text-align:center;padding:10px;background:var(--card2);border-radius:8px;}
+  .oee-val{font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;}
+  .oee-lbl{font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-top:2px;}
+
+  /* Cycle chart */
+  .cycle-chart{display:flex;align-items:flex-end;gap:4px;height:70px;padding-top:6px;}
+  .ct-bar{flex:1;border-radius:3px 3px 0 0;min-width:8px;}
+  .ct-lbl{font-size:7px;color:var(--dim);font-family:'JetBrains Mono',monospace;text-align:center;margin-top:2px;}
+
+  /* Table */
+  table{width:100%;border-collapse:collapse;font-size:12px;}
+  th{text-align:left;padding:6px 8px;color:var(--dim);font-size:9px;letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid var(--border);}
+  td{padding:6px 8px;border-bottom:1px solid var(--border);}
+  .oee-badge{display:inline-block;padding:2px 6px;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;}
+
+  .footer{text-align:center;color:var(--dim);font-size:10px;margin-top:10px;}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <h1>⚙ Fabrika <span>IoT</span> Dashboard</h1>
+  <div class="top-right">
+    <div class="status"><div class="dot dot-green" id="sDot"></div><span style="font-size:11px;color:var(--green);" id="sText">ÜRETİMDE</span></div>
+    <div class="status" id="cycleStatus" style="margin-left:6px;">
+  <div class="dot dot-green" id="cDot"></div>
+  <span style="font-size:11px;color:var(--green);" id="cText">CYCLE</span>
+</div>
+    <span class="badge" style="background:var(--blue);color:white;" id="lineBadge">Qs Hattı</span>
+    <span class="badge" style="background:var(--card2);color:var(--dim);" id="shiftBadge">—</span>
+    <span class="badge" style="background:var(--card2);color:var(--dim);" id="modelBadge">—</span>
+    <a class="badge" href="/static/analytics.html" style="background:var(--purple);color:white;text-decoration:none;">📈 Geçmiş</a>
+    <span class="clock" id="clock">--:--:--</span>
+  </div>
+</div>
+
+<!-- ANA KARTLAR -->
+<div class="grid4">
+  <div class="card">
+    <div class="card-label">Üretilen</div>
+    <div class="card-value" style="color:var(--green);" id="produced">—</div>
+    <div class="card-sub" id="targetSub">Hedef: —</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Fire</div>
+    <a href="/static/scrap.html" target="_blank" style="font-size:11px;color:var(--purple);text-decoration:none;">📊 Analiz →</a>
+    <div class="card-value" style="color:var(--red);" id="scrap">—</div>
+    <div class="card-sub" id="qualitySub">Kalite: —</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Bugünkü Toplam Duruş</div>
+    <div class="card-value" style="color:var(--amber);" id="dtToday">—</div>
+    <div class="card-sub" id="dtTodaySub">—</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Durum</div>
+    <div class="card-value" style="color:var(--cyan);font-size:20px;" id="dtStatus">—</div>
+    <div class="card-sub" id="dtSub">—</div>
+  </div>
+</div>
+
+<!-- İLERLEME + ETA + BASKI SAATLERİ -->
+<div class="grid3">
+  <div class="card">
+    <div class="card-label">Üretim İlerleme</div>
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px;">
+      <span style="font-family:'JetBrains Mono',monospace;font-size:26px;font-weight:700;color:var(--green);" id="pct">—</span>
+      <span style="font-size:12px;color:var(--dim);" id="pctText">— / —</span>
+    </div>
+    <div class="progress-bar">
+      <div class="progress-fill" id="pFill" style="width:0%;background:linear-gradient(90deg,var(--green),var(--blue));"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:8px;">
+      <div><span class="card-label">İlk Baskı</span><div style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--text);" id="firstCycle">—</div></div>
+      <div><span class="card-label">Son Baskı</span><div style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--text);" id="lastCycle">—</div></div>
+      <div><span class="card-label">Gerçek Hız</span><div style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--green);" id="rateHour">— ad/sa</div></div>
+      <div><span class="card-label">Teorik Hız</span><div style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--dim);" id="rateTheory">— ad/sa</div></div>
+    </div>
+  </div>
+
+  <div class="eta-card">
+    <div class="card-label" style="color:var(--cyan);">Tahmini Bitiş</div>
+    <div class="eta-time" id="eta">—</div>
+    <div class="eta-detail" id="etaDetail">—</div>
+    <div class="eta-detail" id="etaRemaining">—</div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Son 5 Cycle</div>
+    <div class="cycle-chart" id="cChart"></div>
+    <div style="text-align:center;margin-top:14px;">
+      <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--amber);" id="avgCycle">Ort: —</span>
+    </div>
+  </div>
+</div>
+
+<!-- ÖZET BUTONU -->
+<div class="grid2">
+  <div class="card">
+    <div class="card-label">Anlık Vardiya Özeti</div>
+    <p style="font-size:11px;color:var(--dim);margin:6px 0;">Şu ana kadar olan üretim, duruş ve OEE verilerini hesapla:</p>
+    <button class="summary-btn" id="summaryBtn" onclick="calcSummary()">
+      📊 Vardiya Özetini Hesapla
+    </button>
+    <div class="summary-result" id="summaryResult">
+      <div class="oee-grid">
+        <div class="oee-item">
+          <div class="oee-val" style="color:var(--green);" id="oeeA">—</div>
+          <div class="oee-lbl">Availability</div>
+        </div>
+        <div class="oee-item">
+          <div class="oee-val" style="color:var(--blue);" id="oeeP">—</div>
+          <div class="oee-lbl">Performance</div>
+        </div>
+        <div class="oee-item">
+          <div class="oee-val" style="color:var(--purple);" id="oeeQ">—</div>
+          <div class="oee-lbl">Quality</div>
+        </div>
+        <div class="oee-item">
+          <div class="oee-val" id="oeeO">—</div>
+          <div class="oee-lbl">OEE</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:16px;margin-top:10px;font-size:11px;color:var(--dim);">
+        <span>Üretim: <b style="color:var(--text);" id="smProd">—</b></span>
+        <span>Fire: <b style="color:var(--red);" id="smScrap">—</b></span>
+        <span>Duruş: <b style="color:var(--amber);" id="smDown">—</b></span>
+        <span>Çalışma: <b style="color:var(--text);" id="smWork">—</b></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- VARDİYA TABLOSU -->
+  <div class="card">
+    <div class="card-label">Vardiya Geçmişi</div>
+    <div style="display:flex;gap:8px;align-items:center;margin:12px 0;">
+  <label>Başlangıç <input type="date" id="rapStart"></label>
+  <label>Bitiş <input type="date" id="rapEnd"></label>
+  <button onclick="vardiyaExcel()">Excel İndir</button>
+</div>
+    <table>
+      <thead><tr><th>Tarih</th><th>Vardiya</th><th>Üretim</th><th>Fire</th><th>Duruş</th><th>OEE</th></tr></thead>
+      <tbody id="shiftTable"><tr><td colspan="6" style="color:var(--dim);text-align:center;">Yükleniyor...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+<div class="card" style="margin-top:14px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+    <div class="card-label" style="margin:0;">🗑 Fire (bugün)</div>
+    <span style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;color:var(--red);" id="scrapTotal">—</span>
+  </div>
+  <div id="scrapBars" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;"></div>
+
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--border);padding-top:12px;">
+    <select id="scrapReason" style="background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:8px;font-size:12px;flex:1;min-width:140px;"></select>
+    <input type="number" id="scrapQty" min="1" value="1" style="width:80px;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:8px;font-size:14px;font-family:'JetBrains Mono',monospace;">
+    <button onclick="addScrap()" style="background:var(--red);color:white;border:none;border-radius:7px;padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer;">+ Fire Ekle</button>
+  </div>
+
+  <div id="scrapList" style="margin-top:12px;display:flex;flex-direction:column;gap:4px;max-height:180px;overflow:auto;"></div>
+</div>
+<!-- ═══ YAĞ TAKİBİ ═══ -->
+<div class="card" style="margin-top:14px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+    <div class="card-label" style="margin:0;">🛢 Pres Yağ Durumu</div>
+    <span style="font-size:10px;color:var(--dim);" id="oilUpdate">—</span>
+  </div>
+  <div id="oilGrid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+    <!-- 6 pres kart JS ile basılır -->
+  </div>
+</div>
+<div class="footer" style="display:flex;justify-content:space-between;align-items:center;">
+  <span>3 saniyede bir yenilenir · Son: <span id="lastUp">—</span></span>
+  <span style="display:flex;gap:8px;align-items:center;">
+    <span id="healthDot" class="dot" style="width:8px;height:8px;border-radius:50%;background:var(--dim);"></span>
+    <span id="healthText" style="font-size:10px;color:var(--dim);">Sağlık: —</span>
+  </span>
+</div>
+
+<script>
+const API = window.location.origin;
+const LID = 1;
+let curProduced = 0;
+const scrapState = {total:0, by_reason:[]};
+function renderScrapQuality(){
+  const sc = scrapState.total;
+  const el = document.getElementById('scrap'); if(el) el.textContent = sc;
+  const good = Math.max(curProduced - sc, 0);
+  const q = curProduced > 0 ? (good/curProduced*100).toFixed(1) : '100';
+  const qs = document.getElementById('qualitySub'); if(qs) qs.textContent = `Kalite: %${q}`;
+}
+function currentShiftCode(){const h=new Date().getHours();if(h>=8&&h<19)return 'vardiya_1';if(h>=19||h<3)return 'vardiya_2';return 'vardiya_1';}
+async function fetchOil(){
+  try {
+    const r = await fetch(`${API}/api/v1/oil/current`);
+    if(!r.ok) return;
+    const d = await r.json();
+    
+    const grid = document.getElementById('oilGrid');
+    const TAGS = {
+      1: {level: '88-470BL1', temp: '88-470BT1'},
+      2: {level: '95-470BL1', temp: '95-470BT1'},
+      3: {level: '96-470BL1', temp: '96-470BT1'},
+    };
+
+    grid.innerHTML = d.presses.map(p => {
+      const level = p.level != null ? p.level.toFixed(1) : '—';
+      const temp = p.temperature != null ? p.temperature.toFixed(1) : '—';
+      const tags = TAGS[p.press_id] || {};
+      
+      let tempColor = 'var(--green)';
+      if (p.temperature > 70) tempColor = 'var(--red)';
+      else if (p.temperature > 50) tempColor = 'var(--amber)';
+      
+      let levelColor = 'var(--green)';
+      if (p.level < 30) levelColor = 'var(--red)';
+      else if (p.level < 50) levelColor = 'var(--amber)';
+      
+      const stale = p.age_sec > 180;
+      const opacity = stale ? '0.5' : '1';
+      
+      return `
+        <div style="background:var(--card2);border:1px solid var(--border);
+                    border-radius:10px;padding:14px;opacity:${opacity};">
+          <div style="display:flex;justify-content:space-between;align-items:center;
+                      margin-bottom:12px;">
+            <span style="font-size:15px;font-weight:700;">🛢 Press ${p.press_id}</span>
+            ${stale ? '<span style="font-size:10px;color:var(--red);">⚠ eski veri</span>' : ''}
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+            <div>
+              <div style="font-size:10px;color:var(--dim);letter-spacing:1.5px;">SEVİYE</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:28px;
+                          font-weight:700;color:${levelColor};line-height:1;">${level}L</div>
+              <div style="font-size:9px;color:var(--dim);margin-top:4px;">
+                ${p.level_min_24h != null ? `24sa: ${p.level_min_24h.toFixed(1)} → ${p.level_max_24h.toFixed(1)}` : ''}
+              </div>
+              <div style="font-size:9px;color:var(--dim);margin-top:2px;font-family:'JetBrains Mono',monospace;">
+                ${tags.level || ''}
+              </div>
+            </div>
+            <div>
+              <div style="font-size:10px;color:var(--dim);letter-spacing:1.5px;">SICAKLIK</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:28px;
+                          font-weight:700;color:${tempColor};line-height:1;">${temp}°C</div>
+              <div style="font-size:9px;color:var(--dim);margin-top:4px;">
+                ${p.temp_min_24h != null ? `24sa: ${p.temp_min_24h.toFixed(1)} → ${p.temp_max_24h.toFixed(1)}` : ''}
+              </div>
+              <div style="font-size:9px;color:var(--dim);margin-top:2px;font-family:'JetBrains Mono',monospace;">
+                ${tags.temp || ''}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+    
+    document.getElementById('oilUpdate').textContent = 
+      'Son: ' + new Date(d.fetched_at).toLocaleTimeString('tr-TR');
+  } catch(e) { console.warn(e); }
+}
+
+fetchOil();
+setInterval(fetchOil, 30000);  // 30 saniyede bir
+// Saat
+setInterval(()=>{
+  const n=new Date();
+  document.getElementById('clock').textContent=n.toLocaleTimeString('tr-TR');
+  const h=n.getHours();
+  let s; if(h>=8&&h<19) s='1. Vardiya'; else if(h>=19||h<3) s='2. Vardiya'; else s='—';
+  document.getElementById('shiftBadge').textContent=s;
+},1000);
+
+function fmtTime(iso){
+  if(!iso) return '—';
+  try{const d=new Date(iso);return d.toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'});}catch{return '—';}
+}
+
+function vardiyaExcel() {
+  const s = document.getElementById('rapStart').value;
+  const e = document.getElementById('rapEnd').value;
+  if (!s || !e) { alert('Başlangıç ve bitiş tarihi seç'); return; }
+  window.location.href = `/api/v1/report/vardiya-excel?start=${s}&end=${e}&line_id=1`;
+}
+
+// Anlık
+async function fetchCurrent(){
+  try{
+    const r=await fetch(`${API}/api/v1/production/current/${LID}`);
+    if(!r.ok) return;
+    const d=await r.json();
+    const cDot = document.getElementById('cDot');
+    const cText = document.getElementById('cText');
+    if (d.auto_cycle_on === true) {
+        cDot.className = 'dot';
+        cDot.style.background = 'var(--green)';
+        cDot.style.boxShadow = '0 0 8px var(--green)';
+        cText.textContent = 'CYCLE';
+        cText.style.color = 'var(--green)';
+    } else if (d.auto_cycle_on === false) {
+        cDot.className = 'dot';
+        cDot.style.background = 'var(--red)';
+        cDot.style.boxShadow = '0 0 8px var(--red)';
+        cText.textContent = 'STOP';
+        cText.style.color = 'var(--red)';
+    } else {
+        cDot.className = 'dot';
+        cDot.style.background = 'var(--dim)';
+        cDot.style.boxShadow = 'none';
+        cText.textContent = '...';
+        cText.style.color = 'var(--dim)';
+    }
+    document.getElementById('produced').textContent=d.produced||0;
+    curProduced = d.produced||0;
+    renderScrapQuality();   // Fire + Kalite artık scrap_entries'ten (PLC değil)
+
+    const t=d.target||0, p=d.produced||0;
+    const pct=t>0?(p/t*100).toFixed(1):0;
+
+    document.getElementById('targetSub').textContent=`Hedef: ${t}`;
+    document.getElementById('pct').textContent=`%${pct}`;
+    document.getElementById('pctText').textContent=`${p} / ${t}`;
+    document.getElementById('pFill').style.width=`${Math.min(pct,100)}%`;
+
+    const avg=d.average_cycle||0;
+    document.getElementById('avgCycle').textContent=avg>0?`Ort: ${(avg/10).toFixed(1)}s`:'—';
+    document.getElementById('modelBadge').textContent=d.model_id?`Model ${d.model_id}`:'—';
+
+    // İlk/Son baskı
+    document.getElementById('firstCycle').textContent=fmtTime(d.first_cycle_at);
+    document.getElementById('lastCycle').textContent=fmtTime(d.last_cycle_at);
+
+    // Hız hesapları
+    // Teorik: cycle time'dan (makine hiç durmasa)
+    const theoryRate = avg > 0 ? Math.round(3600 / (avg / 10)) : 0;
+    document.getElementById('rateTheory').textContent = theoryRate > 0 ? `${theoryRate} ad/sa` : '— ad/sa';
+
+    // Gerçek: üretilen / geçen saat (duruşlar dahil)
+    let actualRate = 0;
+    if (d.first_cycle_at && p > 0) {
+      const firstTime = new Date(d.first_cycle_at);
+      const elapsedHours = (Date.now() - firstTime.getTime()) / 3600000;
+      if (elapsedHours > 0.05) { // en az 3 dakika geçmiş olsun
+        actualRate = Math.round(p / elapsedHours);
+      }
+    }
+    document.getElementById('rateHour').textContent = actualRate > 0 ? `${actualRate} ad/sa` : '— ad/sa';
+
+    // ETA — gerçek hızla hesapla (duruşları da hesaba katar)
+    const etaRate = actualRate > 0 ? actualRate : theoryRate;
+    const remaining = t - p;
+    if (remaining > 0 && etaRate > 0) {
+      const remainingMin = Math.round(remaining / etaRate * 60);
+      const etaDate = new Date(Date.now() + remainingMin * 60000);
+      const etaStr = etaDate.toLocaleTimeString('tr-TR', {hour:'2-digit', minute:'2-digit'});
+      document.getElementById('eta').textContent = etaStr;
+      document.getElementById('etaDetail').textContent = `${remaining} adet kaldı`;
+      document.getElementById('etaRemaining').textContent = `~${remainingMin} dk · ${etaRate} ad/sa`;
+    } else if (t > 0 && p >= t) {
+      document.getElementById('eta').textContent = '✅ TAMAMLANDI';
+      document.getElementById('etaDetail').textContent = 'Hedef tamamlandı';
+      document.getElementById('etaRemaining').textContent = `${actualRate || theoryRate} ad/sa`;
+    } else {
+      document.getElementById('eta').textContent = '—';
+      document.getElementById('etaDetail').textContent = 'Hesaplanamıyor';
+      document.getElementById('etaRemaining').textContent = '';
+    }
+
+    // Cycle chart
+    let l5=[];try{l5=JSON.parse(d.last_5_cycles||'[]');}catch{}
+    const ch=document.getElementById('cChart');
+    if(l5.length){
+      const mx=Math.max(...l5,avg)*1.2||100;
+      ch.innerHTML=l5.map(v=>{
+        const h2=v/mx*70;
+        const c=avg>0&&v>avg*1.1?'var(--amber)':'var(--blue)';
+        return `<div style="flex:1;text-align:center;"><div class="ct-bar" style="height:${h2}px;background:${c};"></div><div class="ct-lbl">${(v/10).toFixed(1)}</div></div>`;
+      }).join('');
+    }
+
+    document.getElementById('lastUp').textContent=new Date().toLocaleTimeString('tr-TR');
+  }catch(e){console.warn(e);}
+}
+
+// Duruş
+async function fetchDt(){
+  try{
+    const r=await fetch(`${API}/api/v1/downtimes/active/${LID}`);
+    if(!r.ok) return;
+    const d=await r.json();
+    if(d&&d.downtime_id){
+      document.getElementById('sDot').className='dot dot-red';
+      document.getElementById('sText').textContent='DURUŞTA';
+      document.getElementById('sText').style.color='var(--red)';
+      document.getElementById('dtStatus').textContent=d.reason_name||'Duruş';
+      document.getElementById('dtStatus').style.color='var(--red)';
+      document.getElementById('dtSub').textContent=`${d.elapsed_text||'—'} süredir`;
+    }else{
+      document.getElementById('sDot').className='dot dot-green';
+      document.getElementById('sText').textContent='ÜRETİMDE';
+      document.getElementById('sText').style.color='var(--green)';
+      document.getElementById('dtStatus').textContent='Çalışıyor';
+      document.getElementById('dtStatus').style.color='var(--cyan)';
+      document.getElementById('dtSub').textContent='Aktif duruş yok';
+    }
+  }catch(e){}
+}
+
+// Vardiya tablosu
+async function fetchShifts(){
+  try{
+    const r=await fetch(`${API}/api/v1/production/shifts?line_id=${LID}&days=15`);
+    if(!r.ok) return;
+    const data=await r.json();
+    const tb=document.getElementById('shiftTable');
+    if(!data.length){tb.innerHTML='<tr><td colspan="6" style="color:var(--dim);text-align:center;">Veri yok</td></tr>';return;}
+    tb.innerHTML=data.map(s=>{
+      const oee=s.oee_overall||0;
+      let oc='var(--green)';if(oee<60)oc='var(--red)';else if(oee<80)oc='var(--amber)';
+      const sl={'vardiya_1':'V1','vardiya_2':'V2','vardiya_3':'V3'}[s.shift]||s.shift;
+      return `<tr style="cursor:pointer" onclick="window.open('/static/downtimes.html?date=${s.shift_date}&shift=${s.shift}&line_id=${LID}&produced=${s.total_produced||0}&scrap=${s.total_scrap||0}','_blank')"><td>${s.shift_date}</td><td>${sl}</td><td style="font-weight:700;color:var(--green)">${s.total_produced||0}</td><td style="color:var(--red)">${s.total_scrap||0}</td><td>${Math.round((s.total_downtime_sec||0)/60)} dk</td><td><span class="oee-badge" style="background:${oc}20;color:${oc};">%${oee.toFixed(1)}</span></td></tr>`;
+    }).join('');
+  }catch(e){}
+}
+
+// Özet hesapla
+async function calcSummary(){
+  const btn=document.getElementById('summaryBtn');
+  btn.disabled=true;btn.textContent='⏳ Hesaplanıyor...';
+  try{
+    const r=await fetch(`${API}/api/v1/production/summary/now?line_id=${LID}`,{method:'POST'});
+    const d=await r.json();
+    if(d.error){alert(d.error);return;}
+
+    const res=document.getElementById('summaryResult');
+    res.style.display='block';
+
+    const oee=d.oee||{};
+    document.getElementById('oeeA').textContent=`%${oee.availability||0}`;
+    document.getElementById('oeeP').textContent=`%${oee.performance||0}`;
+    document.getElementById('oeeQ').textContent=`%${oee.quality||0}`;
+
+    const ov=oee.overall||0;
+    const el=document.getElementById('oeeO');
+    el.textContent=`%${ov}`;
+    el.style.color=ov>=80?'var(--green)':ov>=60?'var(--amber)':'var(--red)';
+
+    document.getElementById('smProd').textContent=d.produced||0;
+    document.getElementById('smScrap').textContent=d.scrap||0;
+    document.getElementById('smDown').textContent=`${d.downtime_min||0} dk`;
+    document.getElementById('smWork').textContent=`${d.available_min||0} dk`;
+  }catch(e){alert('Hata: '+e.message);}
+  finally{btn.disabled=false;btn.textContent='📊 Vardiya Özetini Hesapla';}
+}
+
+function fmtDowntime(sec){sec=Math.round(sec);if(sec<60)return sec+' sn';const m=Math.floor(sec/60);if(m<60)return m+' dk';const h=Math.floor(m/60);return h+'sa '+(m%60)+'dk';}
+async function fetchTodayDowntime(){
+  try{
+    const ds=scrapTodayStr();
+    const r=await fetch(`${API}/api/v1/downtimes/analysis?line_id=${LID}&date_from=${ds}&date_to=${ds}`);
+    if(!r.ok) return;
+    const d=await r.json();
+    const HIDDEN=['VARDIYA_SONU','BELIRLENMEDI'];
+    const reasons=(d.reasons||[]).filter(x=>!HIDDEN.includes(x.reason_code));
+    const totalSec=reasons.reduce((a,x)=>a+(x.total_sec||0),0);
+    const cnt=reasons.reduce((a,x)=>a+(x.count||0),0);
+    const plannedSec=reasons.filter(x=>x.category==='planned').reduce((a,x)=>a+(x.total_sec||0),0);
+    const unplanned=totalSec-plannedSec;
+    document.getElementById('dtToday').textContent=fmtDowntime(totalSec);
+    document.getElementById('dtTodaySub').textContent=totalSec>0?`${cnt} duruş · plansız %${(unplanned/totalSec*100).toFixed(0)}`:'Bugün duruş yok';
+  }catch(e){}
+}
+
+fetchCurrent();fetchDt();fetchShifts();fetchTodayDowntime();
+setInterval(fetchCurrent,3000);
+setInterval(fetchDt,5000);
+setInterval(fetchShifts,60000);
+setInterval(fetchTodayDowntime,30000);
+async function loadScrapReasons(){
+  try{
+    const r=await fetch(`${API}/api/v1/scrap/reasons`); if(!r.ok)return;
+    const data=await r.json();
+    document.getElementById('scrapReason').innerHTML =
+      data.map(x=>`<option value="${x.reason_id}">${x.reason_name}</option>`).join('');
+  }catch(e){}
+}
+async function fetchScrap(){
+  try{
+    const r=await fetch(`${API}/api/v1/scrap/summary/${LID}`); if(!r.ok)return;
+    const d=await r.json();
+    scrapState.total=d.total_qty||0; scrapState.by_reason=d.by_reason||[];
+    document.getElementById('scrapTotal').textContent=scrapState.total;
+    renderScrapQuality();
+    const max=Math.max(...scrapState.by_reason.map(x=>x.qty),1);
+    document.getElementById('scrapBars').innerHTML = scrapState.by_reason.length
+      ? scrapState.by_reason.map(x=>`
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:11px;color:var(--dim);width:110px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${x.reason_name}</span>
+          <div style="flex:1;background:var(--card2);border-radius:5px;height:16px;overflow:hidden;">
+            <div style="height:100%;width:${x.qty/max*100}%;background:${x.color_hex||'var(--red)'};border-radius:5px;"></div>
+          </div>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text);width:34px;text-align:right;">${x.qty}</span>
+        </div>`).join('')
+      : '<span style="font-size:12px;color:var(--dim);">Bugün fire girişi yok</span>';
+  }catch(e){}
+}
+function scrapTodayStr(){const n=new Date();return new Date(n.getTime()-n.getTimezoneOffset()*60000).toISOString().slice(0,10);}
+
+async function fetchScrapList(){
+  try{
+    const ds=scrapTodayStr();
+    const r=await fetch(`${API}/api/v1/scrap/history?line_id=${LID}&date_from=${ds}&date_to=${ds}&limit=100`);
+    if(!r.ok)return;
+    const d=await r.json();
+    document.getElementById('scrapList').innerHTML=(d.items||[]).length
+      ? d.items.map(it=>{
+          const t=new Date(it.created_at).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'});
+          return `<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border);">
+            <span style="color:var(--dim);font-family:'JetBrains Mono',monospace;">${t}</span>
+            <span style="flex:1;"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${it.color_hex||'var(--red)'};margin-right:6px;"></span>${it.reason_name}</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--red);">${it.qty}</span>
+            <button onclick="delScrap(${it.id})" style="background:transparent;border:none;color:var(--dim);cursor:pointer;font-size:14px;padding:0 4px;">✕</button>
+          </div>`;
+        }).join('')
+      : '<span style="font-size:11px;color:var(--dim);">—</span>';
+  }catch(e){}
+}
+async function addScrap(){
+  const rid=+document.getElementById('scrapReason').value;
+  const qty=+document.getElementById('scrapQty').value;
+  if(!rid||!qty||qty<1){alert('Sebep ve adet gir');return;}
+  try{
+    const r=await fetch(`${API}/api/v1/scrap/entry`,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({line_id:LID,reason_id:rid,qty:qty,shift:currentShiftCode(),source:'dashboard'})});
+    if(!r.ok){let m=r.status;try{m=(await r.json()).detail||m;}catch{} alert('Hata: '+m);return;}
+    document.getElementById('scrapQty').value=1;
+    fetchScrap(); fetchScrapList();
+  }catch(e){alert('Hata: '+e.message);}
+}
+async function delScrap(id){
+  if(!confirm('Bu fire kaydı silinsin mi?'))return;
+  try{await fetch(`${API}/api/v1/scrap/entry/${id}`,{method:'DELETE'}); fetchScrap(); fetchScrapList();}catch(e){}
+}
+loadScrapReasons(); fetchScrap(); fetchScrapList();
+setInterval(fetchScrap, 5000);
+setInterval(fetchScrapList, 15000);
+async function fetchHealth(){
+  try {
+    const r = await fetch(`${API}/api/v1/health/data-flow`);
+    const d = await r.json();
+    const dot = document.getElementById('healthDot');
+    const txt = document.getElementById('healthText');
+    if (d.overall_healthy) {
+      dot.style.background = 'var(--green)';
+      txt.textContent = 'Sistem sağlıklı';
+      txt.style.color = 'var(--green)';
+    } else {
+      dot.style.background = 'var(--red)';
+      const fail = Object.entries(d.checks).filter(([_,v]) => !v.healthy).map(([k,_]) => k);
+      txt.textContent = `Uyarı: ${fail.join(', ')}`;
+      txt.style.color = 'var(--red)';
+    }
+  } catch(e) {}
+}
+fetchHealth();
+setInterval(fetchHealth, 30000);
+</script>
+</body>
+</html>

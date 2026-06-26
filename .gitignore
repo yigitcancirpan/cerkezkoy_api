@@ -1,0 +1,7 @@
+report.env
+*.env
+__pycache__/
+*.pyc
+*.log
+backups/
+*.sql.gz

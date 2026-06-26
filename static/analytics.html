@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Geçmiş & Analiz — Fabrika IoT</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=DM+Sans:wght@400;500;700;900&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box;}
+  :root{--bg:#0a0e17;--card:#111827;--card2:#1a2035;--border:#1e293b;--text:#e2e8f0;--dim:#64748b;--green:#10b981;--blue:#3b82f6;--red:#ef4444;--amber:#f59e0b;--purple:#8b5cf6;--cyan:#06b6d4;}
+  body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min-height:100vh;padding:16px;}
+
+  .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;}
+  .top h1{font-size:18px;font-weight:900;}
+  .top h1 span{color:var(--green);}
+  .back{padding:6px 12px;border-radius:6px;font-size:11px;font-weight:700;background:var(--card2);color:var(--dim);text-decoration:none;border:1px solid var(--border);}
+  .back:hover{color:var(--text);}
+
+  .tabs{display:flex;gap:6px;margin-bottom:14px;}
+  .tab{padding:9px 18px;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;background:var(--card);border:1px solid var(--border);color:var(--dim);}
+  .tab.active{background:var(--card2);color:var(--text);border-color:var(--blue);}
+  .panel{display:none;}
+  .panel.active{display:block;}
+
+  .card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:12px;}
+  .card-label{font-size:9px;letter-spacing:1.5px;color:var(--dim);text-transform:uppercase;margin-bottom:10px;}
+
+  .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;}
+  .controls label{font-size:11px;color:var(--dim);}
+  input[type=date]{background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:7px 10px;font-family:'DM Sans',sans-serif;font-size:12px;}
+  .seg{display:flex;border:1px solid var(--border);border-radius:7px;overflow:hidden;}
+  .seg button{background:var(--card2);color:var(--dim);border:none;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;}
+  .seg button.on{background:var(--blue);color:white;}
+
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px;}
+  @media(max-width:760px){.kpis{grid-template-columns:repeat(2,1fr);}}
+  .kpi{background:var(--card2);border-radius:8px;padding:12px;}
+  .kpi .v{font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;line-height:1;}
+  .kpi .l{font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-top:4px;}
+
+  /* Grafikler küçük — 2 sütun, tıklayınca büyür */
+  .chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  @media(max-width:880px){.chart-grid{grid-template-columns:1fr;}}
+  .chart-card{cursor:pointer;transition:border-color .15s;}
+  .chart-card:hover{border-color:var(--blue);}
+  .chart-card .hint{float:right;font-size:11px;color:var(--dim);font-weight:400;letter-spacing:0;}
+  .chart-wrap{width:100%;position:relative;}
+  svg{width:100%;height:auto;display:block;}
+  .empty{text-align:center;color:var(--dim);font-size:13px;padding:40px 0;}
+
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;justify-content:center;}
+  .legend span{font-size:11px;color:var(--dim);display:flex;align-items:center;gap:5px;font-family:'JetBrains Mono',monospace;}
+  .legend i{width:14px;height:3px;border-radius:2px;display:inline-block;}
+
+  .tip{position:absolute;pointer-events:none;background:#0f1626;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--text);box-shadow:0 6px 20px rgba(0,0,0,.55);z-index:5;display:none;white-space:nowrap;}
+  .tip .th{font-size:10px;color:var(--dim);margin-bottom:5px;font-family:'JetBrains Mono',monospace;}
+  .tip .tr{display:flex;align-items:center;gap:6px;font-family:'JetBrains Mono',monospace;line-height:1.6;}
+  .tip .tr i{width:10px;height:10px;border-radius:2px;display:inline-block;flex-shrink:0;}
+
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;z-index:50;padding:20px;}
+  .modal.open{display:flex;}
+  .modal-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;width:min(1100px,94vw);max-height:92vh;overflow:auto;position:relative;}
+  .modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
+  .modal-head h3{font-size:15px;font-weight:800;}
+  .modal-close{background:var(--card2);border:1px solid var(--border);color:var(--text);width:34px;height:34px;border-radius:8px;cursor:pointer;font-size:18px;line-height:1;}
+  .modal-close:hover{border-color:var(--red);color:var(--red);}
+
+  .footer{text-align:center;color:var(--dim);font-size:10px;margin-top:10px;}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <h1>📈 Geçmiş <span>&amp; Analiz</span></h1>
+  <a class="back" href="/static/dashboard.html">← Dashboard</a>
+</div>
+
+<div class="tabs">
+  <div class="tab active" data-tab="prod" onclick="switchTab('prod')">Üretim &amp; OEE</div>
+  <div class="tab" data-tab="oil" onclick="switchTab('oil')">Yağ</div>
+</div>
+
+<!-- ÜRETİM & OEE -->
+<div class="panel active" id="panel-prod">
+  <div class="controls">
+    <label>Aralık:</label>
+    <div class="seg" id="daysSeg">
+      <button data-d="7">7 gün</button>
+      <button data-d="15" class="on">15 gün</button>
+      <button data-d="30">30 gün</button>
+    </div>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi"><div class="v" style="color:var(--green);" id="kProd">—</div><div class="l">Toplam Üretim</div></div>
+    <div class="kpi"><div class="v" style="color:var(--red);" id="kScrap">—</div><div class="l">Toplam Fire</div></div>
+    <div class="kpi"><div class="v" style="color:var(--cyan);" id="kOee">—</div><div class="l">Ort. OEE</div></div>
+    <div class="kpi"><div class="v" style="color:var(--amber);" id="kDays">—</div><div class="l">Gün Sayısı</div></div>
+  </div>
+
+  <div class="chart-grid">
+    <div class="card chart-card" data-chart="prod">
+      <div class="card-label">Günlük Üretim <span class="hint">⤢ büyüt</span></div>
+      <div class="chart-wrap" id="prodChart"></div>
+    </div>
+    <div class="card chart-card" data-chart="oee">
+      <div class="card-label">Günlük OEE (%) <span class="hint">⤢ büyüt</span></div>
+      <div class="chart-wrap" id="oeeChart"></div>
+    </div>
+  </div>
+</div>
+
+<!-- YAĞ -->
+<div class="panel" id="panel-oil">
+  <div class="controls">
+    <label>Seviye aralığı:</label>
+    <div class="seg" id="oilDaysSeg">
+      <button data-d="7">7 gün</button>
+      <button data-d="15" class="on">15 gün</button>
+      <button data-d="30">30 gün</button>
+    </div>
+    <label style="margin-left:10px;">Sıcaklık günü:</label>
+    <input type="date" id="oilDate">
+    <label style="margin-left:10px;">Pres:</label>
+    <div class="seg" id="pressSeg">
+      <button data-p="all" class="on">Hepsi</button>
+      <button data-p="1">P1</button>
+      <button data-p="2">P2</button>
+      <button data-p="3">P3</button>
+    </div>
+  </div>
+
+  <div class="chart-grid">
+    <div class="card chart-card" data-chart="level">
+      <div class="card-label">Günlük Yağ Seviyesi (gün sonu · min–max bandı, L) <span class="hint">⤢ büyüt</span></div>
+      <div class="chart-wrap" id="levelChart"></div>
+    </div>
+    <div class="card chart-card" data-chart="temp">
+      <div class="card-label">Yağ Sıcaklığı — Gün İçi (15 dk, °C) <span class="hint">⤢ büyüt</span></div>
+      <div class="chart-wrap" id="tempChart"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="modal" id="modal" onclick="if(event.target===this)closeModal()">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3 id="modalTitle">—</h3>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="chart-wrap" id="modalBody"></div>
+  </div>
+</div>
+
+<div class="footer">Fabrika IoT · Geçmiş analiz</div>
+
+<script>
+const API = window.location.origin;
+const LID = 1;
+const PRESS = {
+  1: {color:'var(--cyan)',   tag:'88-470'},
+  2: {color:'var(--amber)',  tag:'95-470'},
+  3: {color:'var(--purple)', tag:'96-470'},
+};
+
+const NS='http://www.w3.org/2000/svg';
+function el(tag,attrs){const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);return e;}
+function clear(n){while(n.firstChild)n.removeChild(n.firstChild);}
+function emptyMsg(c,m){clear(c);const d=document.createElement('div');d.className='empty';d.textContent=m||'Bu aralıkta veri yok';c.appendChild(d);}
+
+function tipPosition(tip,container,e){
+  const r=container.getBoundingClientRect();
+  let left=e.clientX-r.left+14, top=e.clientY-r.top+14;
+  const tw=tip.offsetWidth, th=tip.offsetHeight;
+  if(left+tw>r.width) left=e.clientX-r.left-tw-14;
+  if(left<0)left=4;
+  if(top+th>r.height) top=Math.max(4,r.height-th-6);
+  tip.style.left=left+'px'; tip.style.top=top+'px';
+}
+
+function lineChart(container, opts){
+  const W=820,H=300,P={l:46,r:14,t:14,b:34};
+  const innerW=W-P.l-P.r, innerH=H-P.t-P.b;
+  clear(container);
+  const allY=[]; opts.series.forEach(s=>s.pts.forEach(p=>{if(p.y!=null)allY.push(p.y);if(p.lo!=null)allY.push(p.lo);if(p.hi!=null)allY.push(p.hi);}));
+  if(!allY.length){emptyMsg(container);return;}
+  let yMin=opts.yMin!=null?opts.yMin:Math.min(...allY);
+  let yMax=opts.yMax!=null?opts.yMax:Math.max(...allY);
+  if(yMin===yMax){yMin-=1;yMax+=1;}
+  if(opts.yMin==null) yMin=yMin-(yMax-yMin)*0.1;
+  if(opts.yMax==null) yMax=yMax+(yMax-yMin)*0.1;
+  const allX=[]; opts.series.forEach(s=>s.pts.forEach(p=>allX.push(p.x)));
+  const xMin=Math.min(...allX), xMax=Math.max(...allX), xSpan=(xMax-xMin)||1;
+  const sx=x=>P.l+(x-xMin)/xSpan*innerW;
+  const sy=y=>P.t+(1-(y-yMin)/(yMax-yMin))*innerH;
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'xMidYMid meet'});
+  const yt=4;
+  for(let i=0;i<=yt;i++){
+    const v=yMin+(yMax-yMin)*i/yt, y=sy(v);
+    svg.appendChild(el('line',{x1:P.l,y1:y,x2:W-P.r,y2:y,stroke:'#1e293b','stroke-width':1}));
+    const t=el('text',{x:P.l-6,y:y+3,'text-anchor':'end','font-size':9,style:'fill:var(--dim);font-family:JetBrains Mono,monospace'});
+    t.textContent=opts.yFmt?opts.yFmt(v):v.toFixed(0); svg.appendChild(t);
+  }
+  (opts.xTicks||[]).forEach(tk=>{
+    const x=sx(tk.x);
+    svg.appendChild(el('line',{x1:x,y1:P.t,x2:x,y2:H-P.b,stroke:'#1e293b','stroke-width':1,'stroke-dasharray':'2,4'}));
+    const t=el('text',{x:x,y:H-P.b+16,'text-anchor':'middle','font-size':9,style:'fill:var(--dim);font-family:JetBrains Mono,monospace'});
+    t.textContent=tk.label; svg.appendChild(t);
+  });
+  // Min-max bandı (pts'te lo/hi varsa) — çizgilerin arkasına soluk dolgu
+  opts.series.forEach(s=>{
+    let i=0;
+    while(i<s.pts.length){
+      if(s.pts[i].lo==null||s.pts[i].hi==null){i++;continue;}
+      let j=i;
+      while(j+1<s.pts.length && s.pts[j+1].lo!=null && s.pts[j+1].hi!=null) j++;
+      let top='',bot='';
+      for(let k=i;k<=j;k++){const X=sx(s.pts[k].x);top+=(k===i?`M${X.toFixed(1)},${sy(s.pts[k].hi).toFixed(1)}`:` L${X.toFixed(1)},${sy(s.pts[k].hi).toFixed(1)}`);}
+      for(let k=j;k>=i;k--){const X=sx(s.pts[k].x);bot+=` L${X.toFixed(1)},${sy(s.pts[k].lo).toFixed(1)}`;}
+      svg.appendChild(el('path',{d:top+bot+' Z',fill:s.color,'fill-opacity':0.12,stroke:'none'}));
+      i=j+1;
+    }
+  });
+  opts.series.forEach(s=>{
+    let d='',pen=false;
+    s.pts.forEach(p=>{
+      if(p.y==null){pen=false;return;}
+      const X=sx(p.x),Y=sy(p.y);
+      d+=(pen?` L${X.toFixed(1)},${Y.toFixed(1)}`:` M${X.toFixed(1)},${Y.toFixed(1)}`); pen=true;
+    });
+    if(d) svg.appendChild(el('path',{d:d.trim(),fill:'none',stroke:s.color,'stroke-width':2,'stroke-linejoin':'round','stroke-linecap':'round'}));
+    const step=Math.max(1,Math.floor(s.pts.length/40));
+    s.pts.forEach((p,i)=>{if(p.y!=null&&i%step===0)svg.appendChild(el('circle',{cx:sx(p.x),cy:sy(p.y),r:2,fill:s.color}));});
+  });
+  container.appendChild(svg);
+  if(opts.series.length>1||opts.series.some(s=>s.name)){
+    const lg=document.createElement('div');lg.className='legend';
+    opts.series.forEach(s=>{const sp=document.createElement('span');sp.innerHTML=`<i style="background:${s.color}"></i>${s.name||''}`;lg.appendChild(sp);});
+    container.appendChild(lg);
+  }
+  attachLineHover(container,svg,{P,W,H,innerW,innerH,xMin,xSpan,sx,sy},opts.series,opts);
+}
+
+function attachLineHover(container,svg,geom,series,opts){
+  const tip=document.createElement('div');tip.className='tip';container.appendChild(tip);
+  const guide=el('line',{y1:geom.P.t,y2:geom.H-geom.P.b,stroke:'#475569','stroke-width':1,'stroke-dasharray':'3,3',style:'pointer-events:none;display:none'});
+  svg.appendChild(guide);
+  let dots=[];
+  const ov=el('rect',{x:geom.P.l,y:geom.P.t,width:geom.innerW,height:geom.innerH,fill:'transparent',style:'pointer-events:all;cursor:crosshair'});
+  svg.appendChild(ov);
+  function clearDots(){dots.forEach(d=>d.remove());dots=[];}
+  function hide(){tip.style.display='none';guide.style.display='none';clearDots();}
+  ov.addEventListener('mouseleave',hide);
+  ov.addEventListener('mousemove',e=>{
+    const rect=svg.getBoundingClientRect();
+    const vbX=(e.clientX-rect.left)/rect.width*geom.W;
+    const xVal=geom.xMin+(vbX-geom.P.l)/geom.innerW*geom.xSpan;
+    const allX=[]; series.forEach(s=>s.pts.forEach(p=>{if(p.y!=null)allX.push(p.x);}));
+    if(!allX.length){hide();return;}
+    const snap=allX.reduce((a,b)=>Math.abs(b-xVal)<Math.abs(a-xVal)?b:a);
+    const gx=geom.sx(snap);
+    guide.setAttribute('x1',gx);guide.setAttribute('x2',gx);guide.style.display='';
+    clearDots();
+    let rows='';
+    series.forEach(s=>{
+      let pt=null,best=Infinity;
+      s.pts.forEach(p=>{if(p.y!=null){const dd=Math.abs(p.x-snap);if(dd<best){best=dd;pt=p;}}});
+      if(pt){
+        const c=el('circle',{cx:geom.sx(pt.x),cy:geom.sy(pt.y),r:4,fill:s.color,stroke:'#0a0e17','stroke-width':2,style:'pointer-events:none'});
+        svg.appendChild(c);dots.push(c);
+        const val=opts.tipYFmt?opts.tipYFmt(pt.y):pt.y.toFixed(1);
+        const extra=(pt.lo!=null&&pt.hi!=null)?` <span style="color:var(--dim)">(${pt.lo.toFixed(1)}–${pt.hi.toFixed(1)})</span>`:'';
+        rows+=`<div class="tr"><i style="background:${s.color}"></i>${s.name||''} ${val}${extra}</div>`;
+      }
+    });
+    const xlab=opts.tipXLabel?opts.tipXLabel(snap):String(Math.round(snap));
+    tip.innerHTML=`<div class="th">${xlab}</div>${rows}`;
+    tip.style.display='block';
+    tipPosition(tip,container,e);
+  });
+}
+
+function stackedBarChart(container,data){
+  const W=820,H=300,P={l:50,r:14,t:14,b:42};
+  const innerW=W-P.l-P.r, innerH=H-P.t-P.b;
+  clear(container);
+  if(!data.length){emptyMsg(container);return;}
+  const totals=data.map(d=>d.good+d.scrap);
+  const yMax=Math.max(...totals,1)*1.15;
+  const sy=v=>P.t+(1-v/yMax)*innerH;
+  const n=data.length, slot=innerW/n, bw=Math.min(slot*0.6,46);
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:'xMidYMid meet'});
+  const yt=4;
+  for(let i=0;i<=yt;i++){
+    const v=yMax*i/yt,y=sy(v);
+    svg.appendChild(el('line',{x1:P.l,y1:y,x2:W-P.r,y2:y,stroke:'#1e293b','stroke-width':1}));
+    const t=el('text',{x:P.l-6,y:y+3,'text-anchor':'end','font-size':9,style:'fill:var(--dim);font-family:JetBrains Mono,monospace'});
+    t.textContent=Math.round(v);svg.appendChild(t);
+  }
+  const lblStep=n>16?Math.ceil(n/16):1;
+  data.forEach((d,i)=>{
+    const cx=P.l+slot*i+slot/2, x=cx-bw/2, total=d.good+d.scrap;
+    svg.appendChild(el('rect',{x:x,y:sy(d.good),width:bw,height:Math.max((d.good/yMax)*innerH,0),fill:'var(--green)',rx:2}));
+    if(d.scrap>0) svg.appendChild(el('rect',{x:x,y:sy(total),width:bw,height:Math.max((d.scrap/yMax)*innerH,0),fill:'var(--red)',rx:2}));
+    if(i%lblStep===0){
+      const lt=el('text',{x:cx,y:H-P.b+16,'text-anchor':'middle','font-size':9,style:'fill:var(--dim);font-family:JetBrains Mono,monospace'});
+      lt.textContent=d.label;svg.appendChild(lt);
+    }
+  });
+  container.appendChild(svg);
+  const tip=document.createElement('div');tip.className='tip';container.appendChild(tip);
+  const ov=el('rect',{x:P.l,y:P.t,width:innerW,height:innerH,fill:'transparent',style:'pointer-events:all;cursor:crosshair'});
+  svg.appendChild(ov);
+  let hl=null;
+  function hide(){tip.style.display='none';if(hl){hl.remove();hl=null;}}
+  ov.addEventListener('mouseleave',hide);
+  ov.addEventListener('mousemove',e=>{
+    const rect=svg.getBoundingClientRect();
+    const vbX=(e.clientX-rect.left)/rect.width*W;
+    let idx=Math.floor((vbX-P.l)/slot);
+    if(idx<0)idx=0; if(idx>=n)idx=n-1;
+    const d=data[idx], cx=P.l+slot*idx+slot/2, total=d.good+d.scrap;
+    if(hl)hl.remove();
+    hl=el('rect',{x:cx-bw/2-2,y:P.t,width:bw+4,height:innerH,fill:'#ffffff10',style:'pointer-events:none'});
+    svg.insertBefore(hl,ov);
+    tip.innerHTML=`<div class="th">${d.label}</div>`+
+      `<div class="tr"><i style="background:var(--text)"></i>Toplam ${total}</div>`+
+      `<div class="tr"><i style="background:var(--green)"></i>Sağlam ${d.good}</div>`+
+      `<div class="tr"><i style="background:var(--red)"></i>Fire ${d.scrap}</div>`;
+    tip.style.display='block';
+    tipPosition(tip,container,e);
+  });
+}
+
+const specs={};
+function renderInto(container,spec){
+  if(!spec){emptyMsg(container);return;}
+  if(spec.type==='bar') stackedBarChart(container,spec.payload);
+  else lineChart(container,spec.payload);
+}
+
+function openModal(key){
+  const spec=specs[key];
+  if(!spec) return;
+  document.getElementById('modalTitle').textContent=spec.title||'';
+  renderInto(document.getElementById('modalBody'),spec);
+  document.getElementById('modal').classList.add('open');
+}
+function closeModal(){document.getElementById('modal').classList.remove('open');}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
+document.querySelectorAll('.chart-card').forEach(card=>{
+  card.addEventListener('click',()=>openModal(card.dataset.chart));
+});
+
+function fmtDM(iso){if(!iso)return '';const d=new Date(iso+'T00:00:00');return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`;}
+function fmtHM(ms){const d=new Date(ms);return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;}
+function todayLocal(){const n=new Date();return new Date(n.getTime()-n.getTimezoneOffset()*60000).toISOString().slice(0,10);}
+function timeTicks(series){const xs=[];series.forEach(s=>s.pts.forEach(p=>xs.push(p.x)));if(!xs.length)return[];const mn=Math.min(...xs),mx=Math.max(...xs);const t=[];for(let i=0;i<=6;i++){const x=mn+(mx-mn)*i/6;t.push({x,label:fmtHM(x)});}return t;}
+
+let prodDays=15;
+async function loadProduction(){
+  try{
+    const r=await fetch(`${API}/api/v1/production/shifts?line_id=${LID}&days=${prodDays}`);
+    if(!r.ok){emptyMsg(document.getElementById('prodChart'),'Veri alınamadı');return;}
+    const rows=await r.json();
+    const byDate={};
+    rows.forEach(s=>{
+      const d=s.shift_date;
+      if(!byDate[d])byDate[d]={good:0,scrap:0,prod:0,oeeSum:0,oeeW:0};
+      const prod=s.total_produced||0,scrap=s.total_scrap||0;
+      byDate[d].prod+=prod;byDate[d].scrap+=scrap;byDate[d].good+=Math.max(prod-scrap,0);
+      byDate[d].oeeSum+=(s.oee_overall||0)*(prod||1);byDate[d].oeeW+=(prod||1);
+    });
+    const dates=Object.keys(byDate).sort();
+    let tP=0,tS=0,oS=0,oW=0;
+    dates.forEach(d=>{tP+=byDate[d].prod;tS+=byDate[d].scrap;oS+=byDate[d].oeeSum;oW+=byDate[d].oeeW;});
+    document.getElementById('kProd').textContent=tP.toLocaleString('tr-TR');
+    document.getElementById('kScrap').textContent=tS.toLocaleString('tr-TR');
+    document.getElementById('kOee').textContent=oW>0?`%${(oS/oW).toFixed(1)}`:'—';
+    document.getElementById('kDays').textContent=dates.length;
+    const barData=dates.map(d=>({label:fmtDM(d),good:byDate[d].good,scrap:byDate[d].scrap}));
+    specs.prod={type:'bar',payload:barData,title:'Günlük Üretim'};
+    renderInto(document.getElementById('prodChart'),specs.prod);
+    const oeePts=dates.map((d,i)=>({x:i,y:byDate[d].oeeW>0?+(byDate[d].oeeSum/byDate[d].oeeW).toFixed(1):null}));
+    const step=dates.length>16?Math.ceil(dates.length/16):1;
+    const oeeTicks=dates.map((d,i)=>({x:i,label:fmtDM(d)})).filter((_,i)=>i%step===0);
+    specs.oee={type:'line',title:'Günlük OEE (%)',payload:{
+      series:[{name:'OEE',color:'var(--cyan)',pts:oeePts}],
+      xTicks:oeeTicks,yMin:0,yMax:100,yFmt:v=>v.toFixed(0),
+      tipXLabel:i=>fmtDM(dates[Math.round(i)]),tipYFmt:v=>'%'+v.toFixed(1)
+    }};
+    renderInto(document.getElementById('oeeChart'),specs.oee);
+  }catch(e){emptyMsg(document.getElementById('prodChart'),'Hata: '+e.message);}
+}
+
+let oilDays=15, oilDate=todayLocal(), pressFilter='all';
+function filteredPids(raw){return Object.keys(raw).map(Number).filter(pid=>pressFilter==='all'?true:pid==+pressFilter);}
+
+async function loadOilLevel(){
+  try{
+    const hours=Math.min(oilDays*24,720);
+    const r=await fetch(`${API}/api/v1/oil/history?hours=${hours}`);
+    if(!r.ok){emptyMsg(document.getElementById('levelChart'),'Veri alınamadı');return;}
+    const raw=(await r.json()).data||{};
+    const pids=filteredPids(raw);
+    const perPress={}; const daySet=new Set();
+    pids.forEach(pid=>{
+      perPress[pid]={};
+      (raw[pid]||[]).forEach(pt=>{
+        if(pt.level==null)return;
+        const day=pt.t.slice(0,10); daySet.add(day);
+        const cell=(perPress[pid][day]=perPress[pid][day]||{last:null,lastT:-Infinity,min:Infinity,max:-Infinity});
+        const ts=new Date(pt.t).getTime();
+        if(ts>=cell.lastT){cell.lastT=ts;cell.last=pt.level;}   // gün sonu = en geç okuma
+        if(pt.level<cell.min)cell.min=pt.level;
+        if(pt.level>cell.max)cell.max=pt.level;
+      });
+    });
+    let days=[...daySet].sort();
+    if(days.length>oilDays) days=days.slice(-oilDays);
+    if(!days.length){emptyMsg(document.getElementById('levelChart'),'Yağ verisi yok');specs.level=null;return;}
+    const series=pids.map(pid=>({
+      name:`P${pid}`,color:(PRESS[pid]||{}).color||'var(--blue)',
+      pts:days.map((d,i)=>{
+        const c=perPress[pid][d];
+        return c ? {x:i, y:+c.last.toFixed(2), lo:+c.min.toFixed(2), hi:+c.max.toFixed(2)} : {x:i,y:null};
+      })
+    })).filter(s=>s.pts.some(p=>p.y!=null));
+    const step=days.length>16?Math.ceil(days.length/16):1;
+    const xTicks=days.map((d,i)=>({x:i,label:fmtDM(d)})).filter((_,i)=>i%step===0);
+    specs.level={type:'line',title:'Günlük Yağ Seviyesi — gün sonu (bant: gün-içi min–max, L)',payload:{
+      series,xTicks,yFmt:v=>v.toFixed(0),
+      tipXLabel:i=>fmtDM(days[Math.round(i)]),tipYFmt:v=>v.toFixed(1)+'L'
+    }};
+    renderInto(document.getElementById('levelChart'),specs.level);
+  }catch(e){emptyMsg(document.getElementById('levelChart'),'Hata: '+e.message);}
+}
+
+async function loadOilTemp(){
+  try{
+    const sel=new Date(oilDate+'T00:00:00'), now=new Date();
+    const daysBack=Math.max(0,Math.floor((now-sel)/86400000));
+    const hours=Math.min((daysBack+1)*24+24,720);
+    const r=await fetch(`${API}/api/v1/oil/history?hours=${hours}`);
+    if(!r.ok){emptyMsg(document.getElementById('tempChart'),'Veri alınamadı');return;}
+    const raw=(await r.json()).data||{};
+    const pids=filteredPids(raw);
+    const BUCKET=15*60*1000, dayStr=oilDate;
+    function bucketize(points){
+      const b={};
+      points.forEach(pt=>{
+        if(!pt.t.startsWith(dayStr))return;
+        if(pt.temp==null)return;
+        const ms=new Date(pt.t).getTime(), key=Math.floor(ms/BUCKET)*BUCKET;
+        (b[key]=b[key]||{sum:0,n:0});b[key].sum+=pt.temp;b[key].n++;
+      });
+      return Object.keys(b).sort((a,b2)=>a-b2).map(k=>({x:+k,y:+(b[k].sum/b[k].n).toFixed(2)}));
+    }
+    const series=pids.map(pid=>({
+      name:`P${pid}`,color:(PRESS[pid]||{}).color||'var(--blue)',pts:bucketize(raw[pid]||[])
+    })).filter(s=>s.pts.length);
+    if(!series.length){emptyMsg(document.getElementById('tempChart'),'Bu gün için sıcaklık verisi yok');specs.temp=null;return;}
+    specs.temp={type:'line',title:'Yağ Sıcaklığı — '+fmtDM(oilDate)+' (°C)',payload:{
+      series,xTicks:timeTicks(series),yFmt:v=>v.toFixed(0),
+      tipXLabel:ms=>fmtHM(ms),tipYFmt:v=>v.toFixed(1)+'°C'
+    }};
+    renderInto(document.getElementById('tempChart'),specs.temp);
+  }catch(e){emptyMsg(document.getElementById('tempChart'),'Hata: '+e.message);}
+}
+
+function loadOil(){loadOilLevel();loadOilTemp();}
+
+function switchTab(name){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active',p.id==='panel-'+name));
+  if(name==='oil') loadOil();
+}
+document.getElementById('daysSeg').addEventListener('click',e=>{
+  if(e.target.tagName!=='BUTTON')return;
+  document.querySelectorAll('#daysSeg button').forEach(b=>b.classList.remove('on'));
+  e.target.classList.add('on');prodDays=+e.target.dataset.d;loadProduction();
+});
+document.getElementById('oilDaysSeg').addEventListener('click',e=>{
+  if(e.target.tagName!=='BUTTON')return;
+  document.querySelectorAll('#oilDaysSeg button').forEach(b=>b.classList.remove('on'));
+  e.target.classList.add('on');oilDays=+e.target.dataset.d;loadOilLevel();
+});
+document.getElementById('pressSeg').addEventListener('click',e=>{
+  if(e.target.tagName!=='BUTTON')return;
+  document.querySelectorAll('#pressSeg button').forEach(b=>b.classList.remove('on'));
+  e.target.classList.add('on');pressFilter=e.target.dataset.p;loadOil();
+});
+const oilDateInput=document.getElementById('oilDate');
+oilDateInput.value=oilDate;
+oilDateInput.addEventListener('change',()=>{oilDate=oilDateInput.value;loadOilTemp();});
+
+loadProduction();
+</script>
+</body>
+</html>

@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Duruş Takip — Fabrika IoT</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=DM+Sans:wght@400;500;700;900&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box;}
+  :root{--bg:#0a0e17;--card:#111827;--card2:#1a2035;--border:#1e293b;--text:#e2e8f0;--dim:#64748b;--green:#10b981;--blue:#3b82f6;--red:#ef4444;--amber:#f59e0b;--purple:#8b5cf6;--cyan:#06b6d4;}
+  body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min-height:100vh;padding:16px;}
+
+  /* TOP */
+  .top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
+  .top h1{font-size:18px;font-weight:900;white-space:nowrap;}
+  .top h1 span{color:var(--green);}
+  .top-right{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  .badge{padding:4px 10px;border-radius:6px;font-size:10px;font-weight:700;white-space:nowrap;}
+  .status{display:flex;align-items:center;gap:5px;}
+  .dot{width:8px;height:8px;border-radius:50%;}
+  .dot-green{background:var(--green);box-shadow:0 0 8px var(--green);}
+  .dot-red{background:var(--red);box-shadow:0 0 8px var(--red);animation:pulse 1.5s infinite;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+  .clock{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--dim);}
+  .icon-btn{background:transparent;border:none;color:var(--dim);cursor:pointer;font-size:16px;padding:4px;}
+  .icon-btn:hover{color:var(--text);}
+
+  /* GRID */
+  .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;}
+  @media(max-width:900px){.grid4{grid-template-columns:repeat(2,1fr);}.grid2{grid-template-columns:1fr;}}
+
+  .card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;}
+  .card-label{font-size:9px;letter-spacing:1.5px;color:var(--dim);text-transform:uppercase;margin-bottom:4px;}
+  .card-value{font-family:'JetBrains Mono',monospace;font-size:30px;font-weight:700;line-height:1;}
+  .card-sub{font-size:11px;color:var(--dim);margin-top:4px;}
+  .progress-bar{height:10px;background:var(--card2);border-radius:6px;overflow:hidden;margin-top:8px;}
+  .progress-fill{height:100%;border-radius:6px;transition:width 1s;background:linear-gradient(90deg,var(--green),var(--blue));}
+
+  /* DOWNTIME CONTROL */
+  .control{margin-bottom:12px;}
+  .section-label{font-size:10px;letter-spacing:1.5px;color:var(--dim);text-transform:uppercase;margin:4px 0 8px;}
+  .reason-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;}
+  .break-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;}
+  .reason-btn{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+    padding:14px 10px;border:2px solid var(--border);border-radius:12px;background:var(--card2);
+    color:var(--text);font-size:14px;font-weight:600;cursor:pointer;transition:all .12s;
+    min-height:78px;text-align:center;font-family:inherit;
+  }
+  .reason-btn:hover{background:var(--card);transform:translateY(-1px);}
+  .reason-btn:active{transform:scale(0.97);}
+  .reason-btn.selected{background:var(--card);border-width:3px;}
+  .reason-btn .icon{font-size:1.5rem;line-height:1;}
+  .reason-btn .label{line-height:1.15;}
+  .reason-btn .cat{font-size:9px;text-transform:uppercase;letter-spacing:0.5px;opacity:.6;}
+  .actions{display:flex;gap:10px;margin-top:12px;}
+  .act-btn{padding:12px 18px;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;background:var(--card2);}
+  .shift-end-btn{border:2px solid #6B7280;color:var(--dim);}
+  .pending-btn{display:none;border:1px solid var(--amber);color:var(--amber);}
+  .act-btn:hover{background:var(--card);}
+
+  /* TIMER */
+  .timer{display:none;flex-direction:column;align-items:center;gap:12px;padding:10px 0;}
+  .timer.active{display:flex;}
+  .timer-reason{font-size:15px;font-weight:700;padding:6px 18px;border-radius:8px;color:white;}
+  .auto-alert{display:none;background:#DC2626;color:white;padding:10px 16px;border-radius:10px;font-weight:600;font-size:13px;text-align:center;}
+  .timer-display{font-family:'JetBrains Mono',monospace;font-size:56px;font-weight:700;color:var(--red);line-height:1;text-shadow:0 0 40px rgba(239,68,68,.25);}
+  .timer-started{font-size:12px;color:var(--dim);font-family:'JetBrains Mono',monospace;}
+  .change-grid{display:none;width:100%;max-width:620px;}
+  .change-grid .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px;margin-top:6px;}
+  .timer-notes{width:100%;max-width:420px;padding:10px 14px;background:var(--card2);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:14px;font-family:inherit;outline:none;resize:none;text-align:center;}
+  .timer-notes:focus{border-color:var(--blue);}
+  .stop-btn{width:100%;max-width:420px;padding:16px;border:none;border-radius:12px;background:linear-gradient(135deg,#10B981,#059669);color:white;font-size:18px;font-weight:900;font-family:inherit;cursor:pointer;letter-spacing:1px;text-transform:uppercase;}
+  .stop-btn:hover{opacity:.92;}
+  .stop-btn:active{transform:scale(.98);}
+
+  /* SCRAP */
+  .scrap-bars{display:flex;flex-direction:column;gap:6px;margin-bottom:14px;}
+  .scrap-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--border);padding-top:12px;}
+  .scrap-form select{background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:9px;font-size:13px;flex:1;min-width:140px;font-family:inherit;}
+  .scrap-form input{width:90px;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:9px;font-size:15px;font-family:'JetBrains Mono',monospace;}
+  .scrap-form button{background:var(--red);color:white;border:none;border-radius:7px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;}
+  .scrap-form button:hover{opacity:.9;}
+  .scrap-list{margin-top:12px;display:flex;flex-direction:column;gap:2px;max-height:200px;overflow:auto;}
+
+  /* HISTORY */
+  .history-item{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;}
+  .history-item:last-child{border-bottom:none;}
+  .history-item .dot-s{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;}
+  .history-item .dur{font-family:'JetBrains Mono',monospace;color:var(--amber);}
+
+  /* MODAL (centered) */
+  .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;align-items:center;justify-content:center;padding:16px;}
+  .overlay.show{display:flex;}
+  .modal{background:var(--card);border:1px solid var(--border);border-radius:14px;width:100%;max-width:560px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;}
+  .modal-head{padding:14px 18px;border-bottom:2px solid var(--red);}
+  .modal-head h2{font-size:18px;font-weight:800;color:var(--red);}
+  .modal-head .sub{font-size:12px;color:var(--dim);margin-top:2px;}
+  .modal-body{padding:14px;overflow-y:auto;}
+  .modal-foot{padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:10px;}
+  .modal-foot button{padding:10px 18px;border-radius:9px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;background:var(--card2);color:var(--dim);border:1px solid var(--border);}
+  .modal-foot button:hover{background:var(--border);}
+
+  /* CONFIG */
+  .config-box label{display:block;margin-bottom:4px;font-size:12px;color:var(--dim);}
+  .config-box input{width:100%;padding:9px 12px;margin-bottom:12px;background:var(--card2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:14px;font-family:'JetBrains Mono',monospace;outline:none;}
+  .config-box input:focus{border-color:var(--blue);}
+  .config-box .save{width:100%;padding:11px;border:none;border-radius:9px;background:var(--blue);color:white;font-weight:700;font-size:15px;cursor:pointer;font-family:inherit;}
+
+  /* TOAST */
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(100px);padding:13px 22px;border-radius:11px;font-weight:600;font-size:14px;box-shadow:0 8px 30px rgba(0,0,0,.4);transition:transform .3s;z-index:999;pointer-events:none;}
+  .toast.show{transform:translateX(-50%) translateY(0);}
+  .toast.success{background:var(--green);color:white;}
+  .toast.error{background:var(--red);color:white;}
+</style>
+</head>
+<body>
+
+<!-- TOP -->
+<div class="top">
+  <h1>⚙ Duruş <span>Takip</span></h1>
+  <div class="top-right">
+    <div class="status"><div class="dot dot-green" id="sDot"></div><span style="font-size:11px;color:var(--green);" id="sText">ÜRETİMDE</span></div>
+    <span class="badge" style="background:var(--blue);color:white;" id="lineBadge">Qs Hattı</span>
+    <span class="badge" style="background:var(--card2);color:var(--dim);" id="shiftBadge">—</span>
+    <a class="badge" href="/static/dashboard.html" style="background:var(--purple);color:white;text-decoration:none;">📊 Dashboard</a>
+    <span class="clock" id="clock">--:--:--</span>
+    <button class="icon-btn" onclick="toggleConfig()" title="Ayarlar">⚙</button>
+  </div>
+</div>
+
+<!-- STAT CARDS -->
+<div class="grid4">
+  <div class="card">
+    <div class="card-label">Üretilen</div>
+    <div class="card-value" style="color:var(--green);" id="prodVal">—</div>
+    <div class="card-sub" id="targetSub">Hedef: —</div>
+    <div class="progress-bar"><div class="progress-fill" id="pFill" style="width:0%;"></div></div>
+  </div>
+  <div class="card">
+    <div class="card-label">Fire (bugün)</div>
+    <div class="card-value" style="color:var(--red);" id="scrapVal">—</div>
+    <div class="card-sub" id="qualitySub">Kalite: —</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Cycle Time</div>
+    <div class="card-value" style="color:var(--amber);" id="cycleVal">—</div>
+    <div class="card-sub" id="cycleSub">Ort: —</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Durum</div>
+    <div class="card-value" style="color:var(--cyan);font-size:20px;" id="dtStatus">—</div>
+    <div class="card-sub" id="dtSub">—</div>
+  </div>
+</div>
+
+<!-- DOWNTIME CONTROL -->
+<div class="card control">
+  <!-- IDLE -->
+  <div id="idleWrap">
+    <div class="section-label">Duruş Sebebi Seçin</div>
+    <div class="reason-grid" id="reasonGrid"></div>
+    <div class="section-label" id="breakLabel" style="margin-top:14px;">Molalar</div>
+    <div class="break-grid" id="breakGrid"></div>
+    <div class="actions">
+      <button class="act-btn shift-end-btn" onclick="startShiftEnd()">🏁 Vardiya Sonu</button>
+      <button class="act-btn pending-btn" id="pendingBtn" onclick="showPending()">📋 Bekleyen Duruşlar</button>
+    </div>
+  </div>
+  <!-- TIMER -->
+  <div class="timer" id="timerPanel">
+    <div class="timer-reason" id="timerReason">—</div>
+    <div class="auto-alert" id="autoAlert">⚠ Otomatik algılandı — lütfen sebebi seçin!</div>
+    <div class="timer-display" id="timerDisplay">00:00:00</div>
+    <div class="timer-started" id="timerStarted">Başlangıç: --:--</div>
+    <div class="change-grid" id="reasonChangeGrid">
+      <div class="section-label" style="text-align:center;">Gerçek sebebi seçin</div>
+      <div class="grid" id="reasonChangeButtons"></div>
+    </div>
+    <textarea class="timer-notes" id="stopNotes" rows="2" placeholder="Kapanış notu (opsiyonel)"></textarea>
+    <button class="stop-btn" onclick="stopDowntime()">✅ Duruşu Bitir</button>
+  </div>
+</div>
+
+<!-- SCRAP + HISTORY -->
+<div class="grid2">
+  <!-- SCRAP -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <div class="card-label" style="margin:0;">🗑 Fire (bugün)</div>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;color:var(--red);" id="scrapTotal">—</span>
+    </div>
+    <div class="scrap-bars" id="scrapBars"></div>
+    <div class="scrap-form">
+      <select id="scrapReason"></select>
+      <input type="number" id="scrapQty" min="1" value="1">
+      <button onclick="addScrap()">+ Fire Ekle</button>
+    </div>
+    <div class="scrap-list" id="scrapList"></div>
+  </div>
+
+ <!-- BUGÜNKÜ DURUŞLAR -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <div class="card-label" style="margin:0;">⏱ Bugünkü Duruşlar</div>
+      <a class="badge" href="/static/downtimes.html" target="_blank" style="background:var(--purple);color:white;text-decoration:none;">📈 Detaylı Analiz</a>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;">
+      <div style="background:var(--card2);border-radius:8px;padding:10px;text-align:center;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:var(--amber);" id="todayTotal">—</div>
+        <div style="font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-top:2px;">Toplam Süre</div>
+      </div>
+      <div style="background:var(--card2);border-radius:8px;padding:10px;text-align:center;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:var(--blue);" id="todayCount">—</div>
+        <div style="font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-top:2px;">Duruş Adedi</div>
+      </div>
+      <div style="background:var(--card2);border-radius:8px;padding:10px;text-align:center;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:var(--red);" id="todayUnplanned">—</div>
+        <div style="font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-top:2px;">Plansız Pay</div>
+      </div>
+    </div>
+    <div id="todayList" style="display:flex;flex-direction:column;gap:2px;max-height:300px;overflow:auto;">—</div>
+  </div>
+
+<!-- PENDING MODAL -->
+<div class="overlay" id="pendingOverlay">
+  <div class="modal">
+    <div class="modal-head"><h2>⚠ Duruş Sebebini Seç</h2><span class="sub" id="pendingInfo">—</span></div>
+    <div class="modal-body"><div class="reason-grid" id="pendingReasonGrid"></div></div>
+    <div class="modal-foot"><button onclick="closePending()">✕ Vazgeç</button></div>
+  </div>
+</div>
+
+<!-- CONFIG MODAL -->
+<div class="overlay" id="configOverlay">
+  <div class="modal config-box" style="max-width:400px;">
+    <div class="modal-head" style="border-bottom-color:var(--blue);"><h2 style="color:var(--blue);">⚙ Bağlantı Ayarları</h2></div>
+    <div class="modal-body">
+      <label>API Sunucu Adresi</label>
+      <input type="text" id="cfgApiUrl" placeholder="http://192.168.34.52:8000">
+      <label>Hat ID (line_id)</label>
+      <input type="number" id="cfgLineId" placeholder="1">
+      <label>Hat Adı</label>
+      <input type="text" id="cfgLineName" placeholder="Qs Hattı">
+      <button class="save" onclick="saveConfig()">Kaydet & Yenile</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ─── CONFIG (API aynı Pi'da → varsayılan same-origin) ───
+const DEFAULTS = { apiUrl: window.location.origin, lineId: 1, lineName: 'Qs Hattı' };
+function getConfig(){ try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem('durusConfig')) }; } catch { return { ...DEFAULTS }; } }
+function saveConfig(){
+  const cfg = {
+    apiUrl: document.getElementById('cfgApiUrl').value.replace(/\/+$/,'') || DEFAULTS.apiUrl,
+    lineId: parseInt(document.getElementById('cfgLineId').value) || DEFAULTS.lineId,
+    lineName: document.getElementById('cfgLineName').value || DEFAULTS.lineName,
+  };
+  localStorage.setItem('durusConfig', JSON.stringify(cfg));
+  location.reload();
+}
+function toggleConfig(){
+  const cfg = getConfig();
+  document.getElementById('cfgApiUrl').value = cfg.apiUrl;
+  document.getElementById('cfgLineId').value = cfg.lineId;
+  document.getElementById('cfgLineName').value = cfg.lineName;
+  document.getElementById('configOverlay').classList.toggle('show');
+}
+let CONFIG = getConfig();
+document.getElementById('lineBadge').textContent = CONFIG.lineName;
+
+// ─── CONSTANTS ───
+const HIDDEN_CODES = ['BELIRLENMEDI','VARDIYA_SONU'];
+const BREAK_CODES  = ['MOLA_YEMEK','MOLA_CAY','MOLA_NAMAZ'];
+const ICONS = {'alert-triangle':'⚠️','repeat':'🔄','package':'📦','tool':'🔧','check-circle':'✅','settings':'⚙️','zap-off':'⚡','coffee':'☕','help-circle':'❓','wrench':'🔧','alert-circle':'🔴','log-out':'🏁'};
+
+// ─── STATE ───
+let activeDowntime=null, timerInterval=null;
+let cachedReasons=[], scrapReasons=[], pendingQueue=[];
+let curProduced=0, scrapTotalToday=0;
+
+// ─── API ───
+async function api(path, options={}){
+  const url = `${CONFIG.apiUrl}${path}`;
+  try {
+    const res = await fetch(url, { headers:{'Content-Type':'application/json'}, ...options });
+    if(!res.ok){ const err = await res.json().catch(()=>({detail:res.statusText})); throw new Error(err.detail||`HTTP ${res.status}`); }
+    const text = await res.text(); return text ? JSON.parse(text) : null;
+  } catch(e){
+    if(e.message.includes('Failed to fetch')||e.message.includes('NetworkError')) throw new Error(`Sunucuya bağlanılamıyor: ${CONFIG.apiUrl}`);
+    throw e;
+  }
+}
+
+// ─── TOAST ───
+function showToast(msg,type='success'){ const t=document.getElementById('toast'); t.textContent=msg; t.className=`toast ${type} show`; setTimeout(()=>t.classList.remove('show'),3000); }
+
+// ─── SHIFT / CLOCK (detect_shift() ile birebir) ───
+function detectShift(){ const h=new Date().getHours(); if(h>=8&&h<18)return{name:'vardiya_1',label:'1. Vardiya'}; if(h>=18&&h<24)return{name:'vardiya_2',label:'2. Vardiya'}; return{name:'vardiya_3',label:'3. Vardiya'}; }
+function updateClock(){ document.getElementById('clock').textContent=new Date().toLocaleTimeString('tr-TR'); document.getElementById('shiftBadge').textContent=detectShift().label; }
+setInterval(updateClock,1000); updateClock();
+
+// ─── REASON BUTTON ───
+function makeReasonBtn(r,onclick,opts={}){
+  const btn=document.createElement('button'); btn.className='reason-btn';
+  btn.style.borderColor=r.color_hex||'var(--border)'; btn.onclick=onclick;
+  const cat=opts.hideCat?'':`<span class="cat">${r.category==='planned'?'Planlı':'Plansız'}</span>`;
+  btn.innerHTML=`<span class="icon">${ICONS[r.icon]||'🔧'}</span><span class="label">${r.reason_name}</span>${cat}`;
+  return btn;
+}
+
+// ─── REASONS ───
+async function loadReasons(){
+  try{
+    const reasons=await api('/api/v1/downtimes/reasons')||[]; cachedReasons=reasons;
+    const mainGrid=document.getElementById('reasonGrid'), breakGrid=document.getElementById('breakGrid');
+    mainGrid.innerHTML=''; breakGrid.innerHTML='';
+    const mains=reasons.filter(r=>!HIDDEN_CODES.includes(r.reason_code)&&!BREAK_CODES.includes(r.reason_code));
+    const breaks=reasons.filter(r=>BREAK_CODES.includes(r.reason_code));
+    mains.forEach(r=>mainGrid.appendChild(makeReasonBtn(r,()=>startDowntime(r))));
+    breaks.forEach(r=>breakGrid.appendChild(makeReasonBtn(r,()=>startDowntime(r),{hideCat:true})));
+    document.getElementById('breakLabel').style.display=breaks.length?'block':'none';
+  }catch(e){ showToast(`Sebepler yüklenemedi: ${e.message}`,'error'); }
+}
+
+// ─── START / STOP / UPDATE ───
+async function startDowntime(reason,skipConfirm=false){
+  if(!skipConfirm&&!confirm(`"${reason.reason_name}" sebebiyle duruş başlatılsın mı?`))return;
+  const shift=detectShift();
+  try{
+    const data=await api('/api/v1/downtimes/start',{method:'POST',body:JSON.stringify({line_id:CONFIG.lineId,reason_id:reason.reason_id,shift:shift.name})});
+    activeDowntime={downtime_id:data.downtime_id,reason_name:reason.reason_name,reason_code:reason.reason_code,color_hex:reason.color_hex||'var(--red)',started_at:new Date(data.started_at)};
+    showTimerUI(); showToast(`Duruş başlatıldı — ${reason.reason_name}`);
+  }catch(e){ showToast(`Hata: ${e.message}`,'error'); }
+}
+async function startShiftEnd(){
+  if(!confirm('Vardiya sonu kaydedilsin mi?'))return;
+  const reason=cachedReasons.find(r=>r.reason_code==='VARDIYA_SONU');
+  if(!reason){ showToast('VARDIYA_SONU sebebi bulunamadı','error'); return; }
+  startDowntime(reason,true);
+}
+async function stopDowntime(){
+  if(!activeDowntime)return; if(!confirm('Duruşu bitirmek istediğinize emin misiniz?'))return;
+  const notes=document.getElementById('stopNotes').value.trim();
+  try{
+    const data=await api(`/api/v1/downtimes/${activeDowntime.downtime_id}/stop`,{method:'POST',body:JSON.stringify({notes:notes||null})});
+    showToast(`Duruş bitti — ${data.duration_text||''}`); activeDowntime=null; showIdleUI(); loadHistory(); fetchPending();
+  }catch(e){ showToast(`Hata: ${e.message}`,'error'); }
+}
+async function updateReason(reason){
+  if(!activeDowntime)return; const params=new URLSearchParams({reason_id:reason.reason_id});
+  try{
+    await api(`/api/v1/downtimes/${activeDowntime.downtime_id}/reason?${params}`,{method:'PATCH'});
+    activeDowntime.reason_name=reason.reason_name; activeDowntime.reason_code=reason.reason_code; activeDowntime.color_hex=reason.color_hex||'var(--red)';
+    document.getElementById('autoAlert').style.display='none'; document.getElementById('reasonChangeGrid').style.display='none';
+    const rl=document.getElementById('timerReason'); rl.textContent=reason.reason_name; rl.style.background=activeDowntime.color_hex;
+    showToast(`Sebep güncellendi: ${reason.reason_name}`);
+  }catch(e){ showToast(`Hata: ${e.message}`,'error'); }
+}
+
+// ─── TIMER UI ───
+function showTimerUI(){
+  document.getElementById('idleWrap').style.display='none';
+  document.getElementById('timerPanel').classList.add('active');
+  const rl=document.getElementById('timerReason'); rl.textContent=activeDowntime.reason_name; rl.style.background=activeDowntime.color_hex;
+  document.getElementById('timerStarted').textContent=`Başlangıç: ${activeDowntime.started_at.toLocaleTimeString('tr-TR')}`;
+  document.getElementById('stopNotes').value='';
+  const isAuto=activeDowntime.reason_code==='BELIRLENMEDI';
+  document.getElementById('autoAlert').style.display=isAuto?'block':'none';
+  document.getElementById('reasonChangeGrid').style.display=isAuto?'block':'none';
+  if(isAuto)buildReasonChangeButtons();
+  clearInterval(timerInterval); timerInterval=setInterval(updateTimer,1000); updateTimer();
+}
+function buildReasonChangeButtons(){
+  const grid=document.getElementById('reasonChangeButtons'); grid.innerHTML='';
+  cachedReasons.filter(r=>!HIDDEN_CODES.includes(r.reason_code)).forEach(r=>{
+    const b=makeReasonBtn(r,()=>updateReason(r),{hideCat:true}); b.style.minHeight='62px'; b.style.padding='8px 6px'; b.style.fontSize='13px'; grid.appendChild(b);
+  });
+}
+function showIdleUI(){
+  clearInterval(timerInterval); document.getElementById('timerPanel').classList.remove('active');
+  document.getElementById('idleWrap').style.display='block';
+  document.getElementById('autoAlert').style.display='none'; document.getElementById('reasonChangeGrid').style.display='none';
+}
+function updateTimer(){
+  if(!activeDowntime)return; const d=Math.max(0,Math.floor((Date.now()-activeDowntime.started_at)/1000));
+  document.getElementById('timerDisplay').textContent=`${String(Math.floor(d/3600)).padStart(2,'0')}:${String(Math.floor((d%3600)/60)).padStart(2,'0')}:${String(d%60).padStart(2,'0')}`;
+}
+
+// ─── SYNC ACTIVE ───
+async function syncActive(){
+  try{
+    const data=await api(`/api/v1/downtimes/active/${CONFIG.lineId}`);
+    if(data&&data.downtime_id){
+      if(!activeDowntime||activeDowntime.downtime_id!==data.downtime_id){
+        activeDowntime={downtime_id:data.downtime_id,reason_name:data.reason_name,reason_code:data.reason_code||'',color_hex:data.color_hex||'var(--red)',started_at:new Date(data.started_at)};
+        showTimerUI(); if(activeDowntime.reason_code==='BELIRLENMEDI')showToast('Otomatik duruş algılandı!','error');
+      }else if((data.reason_code||'')!==activeDowntime.reason_code){
+        activeDowntime.reason_name=data.reason_name; activeDowntime.reason_code=data.reason_code||''; activeDowntime.color_hex=data.color_hex||'var(--red)';
+        const rl=document.getElementById('timerReason'); rl.textContent=data.reason_name; rl.style.background=activeDowntime.color_hex;
+        if(activeDowntime.reason_code!=='BELIRLENMEDI'){ document.getElementById('autoAlert').style.display='none'; document.getElementById('reasonChangeGrid').style.display='none'; }
+      }
+      setStatus(true,data.reason_name,data.elapsed_text);
+    }else{
+      if(activeDowntime){ activeDowntime=null; showIdleUI(); loadHistory(); fetchPending(); showToast('Duruş otomatik kapatıldı — cycle başladı'); }
+      setStatus(false);
+    }
+  }catch(e){}
+}
+function setStatus(down,reason,elapsed){
+  const sDot=document.getElementById('sDot'),sText=document.getElementById('sText'),st=document.getElementById('dtStatus'),sub=document.getElementById('dtSub');
+  if(down){ sDot.className='dot dot-red'; sText.textContent='DURUŞTA'; sText.style.color='var(--red)'; st.textContent=reason||'Duruş'; st.style.color='var(--red)'; sub.textContent=elapsed?`${elapsed} süredir`:'—'; }
+  else{ sDot.className='dot dot-green'; sText.textContent='ÜRETİMDE'; sText.style.color='var(--green)'; st.textContent='Çalışıyor'; st.style.color='var(--cyan)'; sub.textContent='Aktif duruş yok'; }
+}
+
+// ─── BUGÜNKÜ DURUŞLAR (canlı) ───
+function fmtDur(sec){sec=Math.round(sec||0);if(sec<60)return sec+' sn';const m=Math.floor(sec/60);if(m<60)return m+' dk';const h=Math.floor(m/60);return h+'sa '+(m%60)+'dk';}
+async function loadHistory(){
+  try{
+    const ds=scrapTodayStr();
+    const d=await api(`/api/v1/downtimes/timeline?line_id=${CONFIG.lineId}&date_from=${ds}&date_to=${ds}`);
+    // VARDIYA_SONU gizli; BELIRLENMEDI görünür (operatör sebep atayacak)
+    const events=((d&&d.events)||[]).filter(e=>e.reason_code!=='VARDIYA_SONU');
+
+    // ── Özet ──
+    const totalSec=events.reduce((a,e)=>a+(e.duration_sec||0),0);
+    const plannedSec=events.filter(e=>e.category==='planned').reduce((a,e)=>a+(e.duration_sec||0),0);
+    const unplanned=totalSec-plannedSec;
+    document.getElementById('todayTotal').textContent=fmtDur(totalSec);
+    document.getElementById('todayCount').textContent=events.length;
+    document.getElementById('todayUnplanned').textContent=totalSec>0?`%${(unplanned/totalSec*100).toFixed(0)}`:'—';
+
+    // ── Liste (en yeni üstte) ──
+    const list=document.getElementById('todayList');
+    if(!events.length){ list.innerHTML='<div style="color:var(--dim);font-size:13px;">Bugün duruş yok</div>'; return; }
+    list.innerHTML=events.slice().reverse().map(e=>{
+      const s=new Date(e.started_at).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'});
+      const en=e.is_active?'…':new Date(e.ended_at).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'});
+      const pending=e.reason_code==='BELIRLENMEDI';
+      const name=pending?'⚠ Sebep girilmemiş':e.reason_name;
+      const live=e.is_active?'<span style="color:var(--amber);font-size:9px;font-weight:700;margin-left:4px;">CANLI</span>':'';
+      return `<div class="history-item">
+        <span style="font-family:'JetBrains Mono',monospace;color:var(--dim);font-size:11px;width:88px;flex-shrink:0;">${s}–${en}</span>
+        <span style="flex:1;${pending?'color:var(--amber);':''}"><span class="dot-s" style="background:${e.color_hex||'var(--red)'}"></span>${name}${live}</span>
+        <span class="dur">${fmtDur(e.duration_sec)}</span>
+      </div>`;
+    }).join('');
+  }catch(e){}
+}
+
+// ─── PRODUCTION ───
+async function fetchProduction(){
+  try{
+    const d=await api(`/api/v1/production/current/${CONFIG.lineId}`); if(!d)return;
+    curProduced=d.produced||0;
+    document.getElementById('prodVal').textContent=(d.produced!=null)?d.produced:'—';
+    const t=d.target||0;
+    document.getElementById('targetSub').textContent=`Hedef: ${t||'—'}`;
+    document.getElementById('pFill').style.width=`${t>0?Math.min(d.produced/t*100,100):0}%`;
+    const act=d.actual_cycle||0, avg=d.average_cycle||0;
+    document.getElementById('cycleVal').textContent=act>0?`${(act/10).toFixed(1)}s`:(avg>0?`${(avg/10).toFixed(1)}s`:'—');
+    document.getElementById('cycleSub').textContent=avg>0?`Ort: ${(avg/10).toFixed(1)}s`:'Ort: —';
+    renderQuality();
+  }catch(e){}
+}
+function renderQuality(){
+  const good=Math.max(curProduced-scrapTotalToday,0);
+  const q=curProduced>0?(good/curProduced*100).toFixed(1):'100';
+  document.getElementById('qualitySub').textContent=`Kalite: %${q}`;
+}
+
+// ─── SCRAP (dashboard tarzı inline) ───
+function scrapTodayStr(){ const n=new Date(); return new Date(n.getTime()-n.getTimezoneOffset()*60000).toISOString().slice(0,10); }
+async function loadScrapReasons(){
+  try{
+    scrapReasons=await api('/api/v1/scrap/reasons')||[];
+    document.getElementById('scrapReason').innerHTML=scrapReasons.map(x=>`<option value="${x.reason_id}">${x.reason_name}</option>`).join('');
+  }catch(e){}
+}
+async function fetchScrapSummary(){
+  try{
+    const d=await api(`/api/v1/scrap/summary/${CONFIG.lineId}`); if(!d)return;
+    scrapTotalToday=d.total_qty||0;
+    document.getElementById('scrapTotal').textContent=scrapTotalToday;
+    document.getElementById('scrapVal').textContent=scrapTotalToday;
+    renderQuality();
+    const by=d.by_reason||[]; const max=Math.max(...by.map(x=>x.qty),1);
+    document.getElementById('scrapBars').innerHTML=by.length
+      ? by.map(x=>`<div style="display:flex;align-items:center;gap:8px;"><span style="font-size:11px;color:var(--dim);width:110px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${x.reason_name}</span><div style="flex:1;background:var(--card2);border-radius:5px;height:16px;overflow:hidden;"><div style="height:100%;width:${x.qty/max*100}%;background:${x.color_hex||'var(--red)'};border-radius:5px;"></div></div><span style="font-family:'JetBrains Mono',monospace;font-size:12px;width:34px;text-align:right;">${x.qty}</span></div>`).join('')
+      : '<span style="font-size:12px;color:var(--dim);">Bugün fire girişi yok</span>';
+  }catch(e){}
+}
+async function fetchScrapList(){
+  try{
+    const ds=scrapTodayStr();
+    const d=await api(`/api/v1/scrap/history?line_id=${CONFIG.lineId}&date_from=${ds}&date_to=${ds}&limit=100`); if(!d)return;
+    document.getElementById('scrapList').innerHTML=(d.items||[]).length
+      ? d.items.map(it=>{ const t=new Date(it.created_at).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'});
+          return `<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--dim);font-family:'JetBrains Mono',monospace;">${t}</span><span style="flex:1;"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${it.color_hex||'var(--red)'};margin-right:6px;"></span>${it.reason_name}</span><span style="font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--red);">${it.qty}</span><button onclick="delScrap(${it.id})" style="background:transparent;border:none;color:var(--dim);cursor:pointer;font-size:14px;padding:0 4px;">✕</button></div>`;
+        }).join('')
+      : '<span style="font-size:11px;color:var(--dim);">—</span>';
+  }catch(e){}
+}
+async function addScrap(){
+  const rid=+document.getElementById('scrapReason').value, qty=+document.getElementById('scrapQty').value;
+  if(!rid||!qty||qty<1){ showToast('Sebep ve adet gir','error'); return; }
+  try{
+    await api('/api/v1/scrap/entry',{method:'POST',body:JSON.stringify({line_id:CONFIG.lineId,reason_id:rid,qty:qty,shift:detectShift().name,source:'monitor'})});
+    document.getElementById('scrapQty').value=1; fetchScrapSummary(); fetchScrapList(); showToast('Fire eklendi');
+  }catch(e){ showToast(`Hata: ${e.message}`,'error'); }
+}
+async function delScrap(id){
+  if(!confirm('Bu fire kaydı silinsin mi?'))return;
+  try{ await api(`/api/v1/scrap/entry/${id}`,{method:'DELETE'}); fetchScrapSummary(); fetchScrapList(); }catch(e){}
+}
+
+// ─── PENDING ───
+async function fetchPending(){
+  try{
+    const d=await api(`/api/v1/downtimes/history?line_id=${CONFIG.lineId}&limit=50`);
+    const count=((d&&d.items)||[]).filter(it=>it.reason_code==='BELIRLENMEDI').length;
+    const btn=document.getElementById('pendingBtn');
+    if(count>0){ btn.textContent=`📋 Bekleyen Duruşlar (${count})`; btn.style.display='block'; }
+    else btn.style.display='none';
+  }catch(e){}
+}
+async function showPending(){
+  try{
+    const d=await api(`/api/v1/downtimes/history?line_id=${CONFIG.lineId}&limit=50`);
+    let pending=((d&&d.items)||[]).filter(it=>it.reason_code==='BELIRLENMEDI');
+    if(!pending.length){ showToast('Tüm duruşların sebebi girilmiş'); return; }
+    pending.sort((a,b)=>(a.started_at||'').localeCompare(b.started_at||''));
+    pendingQueue=pending; processPendingQueue();
+  }catch(e){ showToast(`Hata: ${e.message}`,'error'); }
+}
+function processPendingQueue(){
+  if(!pendingQueue.length){ document.getElementById('pendingOverlay').classList.remove('show'); fetchPending(); loadHistory(); return; }
+  const item=pendingQueue[0];
+  let info=''; try{ info=`${new Date(item.started_at).toLocaleString('tr-TR')}  ·  ${item.duration_text||''}`; }catch{ info=item.duration_text||''; }
+  document.getElementById('pendingInfo').textContent=`(${pendingQueue.length} kaldı)  ${info}`;
+  const grid=document.getElementById('pendingReasonGrid'); grid.innerHTML='';
+  cachedReasons.filter(r=>!HIDDEN_CODES.includes(r.reason_code)).forEach(r=>grid.appendChild(makeReasonBtn(r,()=>assignPendingReason(item,r),{hideCat:true})));
+  document.getElementById('pendingOverlay').classList.add('show');
+}
+async function assignPendingReason(item,reason){
+  try{ await api(`/api/v1/downtimes/${item.downtime_id}/reason?${new URLSearchParams({reason_id:reason.reason_id})}`,{method:'PATCH'}); showToast(`Sebep atandı: ${reason.reason_name}`); }
+  catch(e){ showToast(`Hata: ${e.message}`,'error'); }
+  pendingQueue.shift(); processPendingQueue();
+}
+function closePending(){ pendingQueue=[]; document.getElementById('pendingOverlay').classList.remove('show'); }
+
+// ─── INIT ───
+async function init(){
+  await loadReasons(); await loadScrapReasons();
+  await syncActive(); await loadHistory();
+  await fetchProduction(); await fetchScrapSummary(); await fetchScrapList(); await fetchPending();
+  setInterval(syncActive,5000);
+  setInterval(fetchProduction,3000);
+  setInterval(fetchScrapSummary,5000);
+  setInterval(fetchScrapList,15000);
+  setInterval(loadHistory,15000);
+  setInterval(fetchPending,60000);
+}
+init();
+</script>
+</body>
+</html>
