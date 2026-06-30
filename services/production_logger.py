@@ -260,19 +260,19 @@ class ProductionLogger:
                 INSERT INTO shift_summary
                     (line_id, shift_date, shift, model_id, target,
                     total_produced, total_scrap, total_good,
-                    avg_cycle_time, total_downtime_sec,
+                    avg_cycle_time, total_downtime_sec, break_sec,
                     oee_availability, oee_performance, oee_quality, oee_overall,
                     first_cycle_at, last_cycle_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (line_id, shift_date, shift) DO UPDATE SET
                     total_produced=EXCLUDED.total_produced, total_scrap=EXCLUDED.total_scrap,
                     total_good=EXCLUDED.total_good, avg_cycle_time=EXCLUDED.avg_cycle_time,
-                    total_downtime_sec=EXCLUDED.total_downtime_sec,
+                    total_downtime_sec=EXCLUDED.total_downtime_sec, break_sec=EXCLUDED.break_sec,
                     oee_availability=EXCLUDED.oee_availability, oee_performance=EXCLUDED.oee_performance,
                     oee_quality=EXCLUDED.oee_quality, oee_overall=EXCLUDED.oee_overall,
                     first_cycle_at=EXCLUDED.first_cycle_at, last_cycle_at=EXCLUDED.last_cycle_at
             """, (line_id, d, shift_code, row["model_id"], target,
-                produced, scrap, good, avg_cycle, unplanned_dt,
+                produced, scrap, good, avg_cycle, unplanned_dt, excluded_dt,
                 round(availability, 1), round(performance, 1),
                 round(quality, 1), round(oee, 1),
                 first_at, last_at))

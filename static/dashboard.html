@@ -195,8 +195,8 @@
   <button onclick="vardiyaExcel()">Excel İndir</button>
 </div>
     <table>
-      <thead><tr><th>Tarih</th><th>Vardiya</th><th>Üretim</th><th>Fire</th><th>Duruş</th><th>OEE</th></tr></thead>
-      <tbody id="shiftTable"><tr><td colspan="6" style="color:var(--dim);text-align:center;">Yükleniyor...</td></tr></tbody>
+      <thead><tr><th>Tarih</th><th>Vardiya</th><th>Üretim</th><th>Fire</th><th>Duruş</th><th>Mola</th><th>OEE</th></tr></thead>
+      <tbody id="shiftTable"><tr><td colspan="7" style="color:var(--dim);text-align:center;">Yükleniyor...</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -469,12 +469,12 @@ async function fetchShifts(){
     if(!r.ok) return;
     const data=await r.json();
     const tb=document.getElementById('shiftTable');
-    if(!data.length){tb.innerHTML='<tr><td colspan="6" style="color:var(--dim);text-align:center;">Veri yok</td></tr>';return;}
+    if(!data.length){tb.innerHTML='<tr><td colspan="7" style="color:var(--dim);text-align:center;">Veri yok</td></tr>';return;}
     tb.innerHTML=data.map(s=>{
       const oee=s.oee_overall||0;
       let oc='var(--green)';if(oee<60)oc='var(--red)';else if(oee<80)oc='var(--amber)';
       const sl={'vardiya_1':'V1','vardiya_2':'V2','vardiya_3':'V3'}[s.shift]||s.shift;
-      return `<tr style="cursor:pointer" onclick="window.open('/static/downtimes.html?date=${s.shift_date}&shift=${s.shift}&line_id=${LID}&produced=${s.total_produced||0}&scrap=${s.total_scrap||0}','_blank')"><td>${s.shift_date}</td><td>${sl}</td><td style="font-weight:700;color:var(--green)">${s.total_produced||0}</td><td style="color:var(--red)">${s.total_scrap||0}</td><td>${Math.round((s.total_downtime_sec||0)/60)} dk</td><td><span class="oee-badge" style="background:${oc}20;color:${oc};">%${oee.toFixed(1)}</span></td></tr>`;
+      return `<tr style="cursor:pointer" onclick="window.open('/static/downtimes.html?date=${s.shift_date}&shift=${s.shift}&line_id=${LID}&produced=${s.total_produced||0}&scrap=${s.total_scrap||0}','_blank')"><td>${s.shift_date}</td><td>${sl}</td><td style="font-weight:700;color:var(--green)">${s.total_produced||0}</td><td style="color:var(--red)">${s.total_scrap||0}</td><td>${Math.round((s.total_downtime_sec||0)/60)} dk</td><td style="color:var(--dim)">${Math.round((s.break_sec||0)/60)} dk</td><td><span class="oee-badge" style="background:${oc}20;color:${oc};">%${oee.toFixed(1)}</span></td></tr>`;
     }).join('');
   }catch(e){}
 }
