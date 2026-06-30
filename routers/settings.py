@@ -11,6 +11,24 @@ from models.database import get_db
 
 router = APIRouter(prefix="/api/v1/settings", tags=["Ayarlar"])
 
+def _publish_config_reload():
+    """Vardiya/ayar değişti → servislere anlık haber ver (cache invalidate)."""
+    try:
+        import paho.mqtt.publish as publish
+        import json, time
+        publish.single(
+            "fabrika/hat1/config",
+            payload=json.dumps({"reload": True, "ts": time.time()}),
+            hostname="127.0.0.1", port=1883,
+        )
+    except Exception:
+        pass   # MQTT yoksa sessiz geç — 60sn TTL zaten devreye girer
+    # API kendi shift_utils cache'ini de hemen tazele
+    try:
+        import shift_utils
+        shift_utils.invalidate()
+    except Exception:
+        pass
 
 class SettingValue(BaseModel):
     value: str
@@ -63,3 +81,55 @@ def set_oil_threshold(press_id: int, body: OilThreshold, db: Session = Depends(g
            "tmin": body.temp_min, "tmax": body.temp_max})
     db.commit()
     return {"press_id": press_id}
+
+class ShiftUpsert(BaseModel):
+    code: str
+    label: str
+    start_hour: int
+    end_hour: int
+    latest_end: int
+    window_hours: int
+    planned_seconds: int
+    display_order: int = 0
+    is_active: bool = True
+
+
+@router.get("/shifts")
+def get_shifts(db: Session = Depends(get_db)):
+    rows = db.execute(text("""
+        SELECT code, label, start_hour, end_hour, latest_end,
+               window_hours, planned_seconds, display_order, is_active
+        FROM shift_config ORDER BY display_order, start_hour
+    """)).fetchall()
+    return [dict(r._mapping) for r in rows]
+
+
+@router.put("/shifts/{code}")
+def upsert_shift(code: str, body: ShiftUpsert, db: Session = Depends(get_db)):
+    db.execute(text("""
+        INSERT INTO shift_config
+            (code, label, start_hour, end_hour, latest_end,
+             window_hours, planned_seconds, display_order, is_active, updated_at)
+        VALUES (:code,:label,:sh,:eh,:le,:wh,:ps,:ord,:act,NOW())
+        ON CONFLICT (code) DO UPDATE SET
+            label=EXCLUDED.label, start_hour=EXCLUDED.start_hour,
+            end_hour=EXCLUDED.end_hour, latest_end=EXCLUDED.latest_end,
+            window_hours=EXCLUDED.window_hours, planned_seconds=EXCLUDED.planned_seconds,
+            display_order=EXCLUDED.display_order, is_active=EXCLUDED.is_active,
+            updated_at=NOW()
+    """), {"code": body.code, "label": body.label, "sh": body.start_hour,
+           "eh": body.end_hour, "le": body.latest_end, "wh": body.window_hours,
+           "ps": body.planned_seconds, "ord": body.display_order, "act": body.is_active})
+    db.commit()
+    _publish_config_reload()        # ← anlık uygulama (MQTT)
+    return {"code": code, "message": "Vardiya kaydedildi"}
+
+
+@router.delete("/shifts/{code}")
+def delete_shift(code: str, db: Session = Depends(get_db)):
+    res = db.execute(text("DELETE FROM shift_config WHERE code=:c RETURNING code"), {"c": code}).fetchone()
+    db.commit()
+    if not res:
+        raise HTTPException(404, "Vardiya bulunamadı")
+    _publish_config_reload()
+    return {"deleted": code}

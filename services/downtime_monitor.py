@@ -35,15 +35,9 @@ import threading
 from datetime import datetime, timezone
 from typing import Optional
 import paho.mqtt.client as mqtt
+import shift_utils
 
 logger = logging.getLogger("downtime_monitor")
-
-
-def detect_shift():
-    h = datetime.now().hour
-    if 8 <= h < 18:
-        return "vardiya_1"
-    return "vardiya_3"
 
 
 class LineState:
@@ -126,7 +120,8 @@ class DowntimeMonitor:
                 client.subscribe(f"{pfx}/makine_durumu")   # ← YENİ ana sinyal (auto_cycle_on)
                 client.subscribe(f"{pfx}/komut")            # ← sadece EMPTY_LINE için
                 client.subscribe(f"{pfx}/uretim")
-                logger.info(f"  Abone: {pfx}/makine_durumu , {pfx}/komut")
+                client.subscribe(f"{pfx}/config")          # ← vardiya/ayar reload
+                logger.info(f"  Abone: {pfx}/makine_durumu , {pfx}/komut , {pfx}/config")
         else:
             logger.error(f"MQTT hata: rc={rc}")
 
@@ -150,6 +145,9 @@ class DowntimeMonitor:
                 self._handle_command(state, payload)
             elif sig == "uretim":
                 self._handle_uretim(state, payload)
+            elif sig == "config":
+                shift_utils.invalidate()
+                logger.info(f"[{state.line_name}] config reload — vardiya cache tazelendi")
         except json.JSONDecodeError:
             pass
         except Exception as e:
@@ -262,13 +260,12 @@ class DowntimeMonitor:
             logger.info(f"[{s.line_name}] İnaktif ama sebep var ({s.active_reason_code}) — kapatılmıyor")
             return
         # ── Sadece GERÇEK vardiya bitişine yakınsa VARDIYA_SONU yap ──
-        # Vardiya ortasındaki uzun duruş (bakım vb.) açık kalsın.
+        # Vardiya bitiş saati tek kaynaktan (shift_config.end_hour).
         h = datetime.now().hour
-        if not (h >= 18 or h < 3):
-            logger.info(f"[{s.line_name}] 60dk sessizlik ama vardiya ortası (saat {h}) — duruş açık tutuluyor")
-            self._start_inactivity(s)   # tekrar 60dk sonra yine kontrol et
-            return
-        logger.warning(f"[{s.line_name}] {self.shift_end_sec/60:.0f}dk sessizlik + vardiya sonu saati → VARDİYA SONU")
+        sh = shift_utils.shift_by_code(shift_utils.detect_shift_code())
+        end_h = sh["end_hour"] % 24
+        if h < end_h:
+            logger.info(f"[{s.line_name}] 60dk sessizlik ama vardiya ortası (saat {h}/{end_h}) — duruş açık tutuluyor")
         self._update_reason_api(s, self.SHIFT_END)
         self._auto_stop(s, "Vardiya sonu — otomatik")
 
@@ -280,7 +277,7 @@ class DowntimeMonitor:
         rid = self._reason_ids.get(code)
         if not rid:
             logger.error(f"'{code}' reason_id bulunamadı"); return
-        body = {"line_id": s.line_id, "reason_id": rid, "shift": detect_shift(),
+        body = {"line_id": s.line_id, "reason_id": rid, "shift": shift_utils.detect_shift_code(),
                 "notes": note or f"Otomatik — {code}", "trigger": trigger}
         # Gerçek duruş anı verildiyse started_at olarak gönder (grace/stall geri tarihleme)
         if started_at_ts:

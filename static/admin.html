@@ -108,6 +108,7 @@
   <div class="tab active" data-tab="dt">Duruş Sebepleri</div>
   <div class="tab" data-tab="scrap">Fire Sebepleri</div>
   <div class="tab" data-tab="records">Duruş Kayıtları</div>
+  <div class="tab" data-tab="shifts">Vardiyalar</div>
   <div class="tab" data-tab="settings">Ayarlar</div>
 </div>
 
@@ -144,7 +145,17 @@
     <p class="hint">Yanlış açılmış otomatik duruşların sebebini değiştir veya kaydı sil. Test sırasında biriken sahte duruşları buradan temizleyebilirsin.</p>
     <div id="records-list"></div>
   </div>
-
+   <!-- ── VARDİYALAR ── -->
+  <div class="section" id="sec-shifts">
+    <div class="row-between">
+      <h2>Vardiya Tanımları</h2>
+      <button class="btn" onclick="openShift(null)">+ Yeni Vardiya</button>
+    </div>
+    <p class="hint">Saat değişiklikleri <strong>anında</strong> yürürlüğe girer (servis yeniden başlatma gerekmez). <strong>Planlanan süre = vardiyanın brüt süresidir; molayı çıkarmayın</strong> — mola, OEE'den hariç işaretli duruşlardan otomatik düşülür. Vardiya ortasında değişiklik yaparsan o <strong>günün tamamı</strong> yeni süreye göre hesaplanır.</p>
+    <table><thead><tr>
+      <th>Vardiya</th><th>Kod</th><th>Saat</th><th>Özet Saati</th><th>Planlanan</th><th>Durum</th><th></th>
+    </tr></thead><tbody id="shift-rows"></tbody></table>
+  </div>
   <!-- ── AYARLAR ── -->
   <div class="section" id="sec-settings">
     <h2 style="margin:0 0 14px; font-size:15px">OEE Hedefi</h2>
@@ -207,7 +218,37 @@
     </div>
   </div>
 </div>
-
+<!-- ── VARDİYA MODALI ── -->
+<div class="overlay" id="shift-modal">
+  <div class="modal">
+    <h3 id="shift-title">Vardiya</h3>
+    <input type="hidden" id="s-orig-code">
+    <div class="grid2">
+      <div class="field"><label>Görünen Ad</label><input id="s-label" placeholder="1. Vardiya"></div>
+      <div class="field"><label>Kod</label><input id="s-code" class="code" placeholder="vardiya_1"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Başlangıç saati (0-23)</label><input type="number" id="s-start" min="0" max="23"></div>
+      <div class="field"><label>Bitiş saati (1-24)</label><input type="number" id="s-end" min="1" max="24"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Özet yazma saati</label><input type="number" id="s-latest" min="0" max="24"></div>
+      <div class="field"><label>Sıra</label><input type="number" id="s-order" value="1"></div>
+    </div>
+    <div class="field">
+      <label>Planlanan süre — saat (brüt, mola dahil)</label>
+      <input type="number" id="s-hours" step="0.25" min="0.25" placeholder="10">
+      <p class="hint" style="margin:6px 0 0">OEE paydası bu süreden hesaplanır. Mola çıkarmayın — otomatik düşülür.</p>
+    </div>
+    <div class="field"><label>Durum</label>
+      <select id="s-active"><option value="true">Aktif</option><option value="false">Pasif</option></select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeModal('shift-modal')">İptal</button>
+      <button class="btn" onclick="saveShift()">Kaydet</button>
+    </div>
+  </div>
+</div>
 <div id="toast"></div>
 
 <script>
@@ -263,6 +304,7 @@ document.querySelectorAll('.tab').forEach(t=>{
     const id = t.dataset.tab;
     document.getElementById('sec-' + id).classList.add('active');
     if(id==='records') loadRecords();
+    if(id==='shifts') loadShifts();
     if(id==='settings') loadSettings();
   };
 });
@@ -414,7 +456,85 @@ async function saveManual(){
     closeModal('manual-modal'); toast('Manuel duruş eklendi'); loadRecords();
   }catch(e){ toast(e.message, false); }
 }
+// ── VARDİYALAR ──
+async function loadShifts(){
+  const rows = await api('GET', '/api/v1/settings/shifts');
+  const tbody = document.getElementById('shift-rows');
+  if(!rows.length){ tbody.innerHTML = '<tr><td colspan="7" class="hint">Vardiya tanımı yok.</td></tr>'; return; }
+  tbody.innerHTML = rows.map(s=>{
+    const hrs = (s.planned_seconds/3600);
+    const hrsTxt = Number.isInteger(hrs) ? hrs : hrs.toFixed(2);
+    return `<tr>
+      <td><strong>${esc(s.label)}</strong></td>
+      <td class="code">${esc(s.code)}</td>
+      <td>${String(s.start_hour).padStart(2,'0')}:00 – ${String(s.end_hour%24).padStart(2,'0')}:00</td>
+      <td>${String(s.latest_end%24).padStart(2,'0')}:00</td>
+      <td>${hrsTxt} saat</td>
+      <td><span class="pill ${s.is_active?'on':'off'}">${s.is_active?'Aktif':'Pasif'}</span></td>
+      <td style="text-align:right; white-space:nowrap">
+        <button class="btn ghost sm" onclick='openShift(${JSON.stringify(s)})'>Düzenle</button>
+        <button class="btn danger sm" onclick="delShift('${esc(s.code)}')">Sil</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
 
+function openShift(s){
+  document.getElementById('shift-title').textContent = s ? 'Vardiya Düzenle' : 'Yeni Vardiya';
+  const codeInp = document.getElementById('s-code');
+  if(s){
+    document.getElementById('s-orig-code').value = s.code;
+    document.getElementById('s-label').value = s.label;
+    codeInp.value = s.code; codeInp.readOnly = true;
+    document.getElementById('s-start').value = s.start_hour;
+    document.getElementById('s-end').value = s.end_hour;
+    document.getElementById('s-latest').value = s.latest_end;
+    document.getElementById('s-order').value = s.display_order;
+    document.getElementById('s-hours').value = (s.planned_seconds/3600);
+    document.getElementById('s-active').value = String(s.is_active);
+  }else{
+    document.getElementById('s-orig-code').value = '';
+    document.getElementById('s-label').value = '';
+    codeInp.value = ''; codeInp.readOnly = false;
+    document.getElementById('s-start').value = 8;
+    document.getElementById('s-end').value = 18;
+    document.getElementById('s-latest').value = 19;
+    document.getElementById('s-order').value = 1;
+    document.getElementById('s-hours').value = 10;
+    document.getElementById('s-active').value = 'true';
+  }
+  document.getElementById('shift-modal').classList.add('show');
+}
+
+async function saveShift(){
+  const code = document.getElementById('s-code').value.trim();
+  const label = document.getElementById('s-label').value.trim();
+  const hours = parseFloat(document.getElementById('s-hours').value);
+  if(!code || !label) return toast('Kod ve ad gerekli', false);
+  if(!hours || hours <= 0) return toast('Planlanan süre 0\'dan büyük olmalı', false);
+  const body = {
+    code,
+    label,
+    start_hour: parseInt(document.getElementById('s-start').value),
+    end_hour: parseInt(document.getElementById('s-end').value),
+    latest_end: parseInt(document.getElementById('s-latest').value),
+    window_hours: Math.round(parseInt(document.getElementById('s-end').value) - parseInt(document.getElementById('s-start').value)) || 0,
+    planned_seconds: Math.round(hours * 3600),
+    display_order: parseInt(document.getElementById('s-order').value) || 1,
+    is_active: document.getElementById('s-active').value === 'true',
+  };
+  if(body.window_hours <= 0) body.window_hours += 24;   // gece yarısını geçen vardiya
+  try{
+    await api('PUT', `/api/v1/settings/shifts/${encodeURIComponent(code)}`, body);
+    closeModal('shift-modal'); toast('Vardiya kaydedildi — anında yürürlükte'); loadShifts();
+  }catch(e){ toast(e.message, false); }
+}
+
+async function delShift(code){
+  if(!confirm(`'${code}' vardiyası silinsin mi?`)) return;
+  try{ await api('DELETE', `/api/v1/settings/shifts/${encodeURIComponent(code)}`); toast('Silindi'); loadShifts(); }
+  catch(e){ toast(e.message, false); }
+}
 // ── AYARLAR ──
 async function loadSettings(){
   try{

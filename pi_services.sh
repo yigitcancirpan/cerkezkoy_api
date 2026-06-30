@@ -49,6 +49,7 @@ Wants=mosquitto.service cerkezkoy_api.service
 Type=simple
 User=server
 WorkingDirectory=/home/server/cerkezkoy_api
+Environment=PYTHONPATH=/home/server/cerkezkoy_api
 Environment=API_URL=http://127.0.0.1:8000
 Environment=MQTT_HOST=127.0.0.1
 Environment=MQTT_PORT=1883
@@ -80,6 +81,7 @@ Wants=mosquitto.service postgresql.service
 Type=simple
 User=server
 WorkingDirectory=/home/server/cerkezkoy_api
+Environment=PYTHONPATH=/home/server/cerkezkoy_api
 Environment=DB_URL=postgresql://yigitcanc:***REMOVED***@127.0.0.1:5432/cerkezkoy_db
 Environment=MQTT_HOST=127.0.0.1
 Environment=LOG_INTERVAL=60

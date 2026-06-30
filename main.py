@@ -14,6 +14,11 @@ from routers import downtimes, production, health, oil, scrap, reports, settings
 async def lifespan(app: FastAPI):
     print("Tablolar oluşturuluyor...")
     Base.metadata.create_all(bind=engine)
+    import shift_utils
+    shift_utils.configure(
+        f"postgresql://{settings.pg_user}:{settings.pg_password}"
+        f"@{settings.pg_host}:{settings.pg_port}/{settings.pg_db}"
+    )
     print("MQTT bağlanıyor...")
     mqtt_service.connect()
     yield

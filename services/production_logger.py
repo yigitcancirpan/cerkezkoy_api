@@ -23,6 +23,7 @@ from typing import Optional
 import paho.mqtt.client as mqtt
 import psycopg2
 from psycopg2.extras import RealDictCursor
+import shift_utils
 
 logger = logging.getLogger("production_logger")
 
@@ -218,9 +219,12 @@ class ProductionLogger:
             scrap = int(cur.fetchone()["s"])
             good = max(produced - scrap, 0)
 
-            # Duruş toplamı — VARDIYA_SONU hariç (gerçek üretkenlik kaybı değil)
+            # Duruşları ikiye ayır: OEE-hariç (mola+vardiya sonu → paydadan düşülür)
+            # ve gerçek kayıp (Availability'den düşülür). /summary/now ile aynı mantık.
             cur.execute("""
-                SELECT COALESCE(SUM(d.duration_sec),0) as total_dt
+                SELECT
+                  COALESCE(SUM(CASE WHEN r.exclude_from_oee THEN d.duration_sec ELSE 0 END),0) AS excluded_dt,
+                  COALESCE(SUM(CASE WHEN NOT r.exclude_from_oee THEN d.duration_sec ELSE 0 END),0) AS unplanned_dt
                 FROM downtimes d
                 JOIN downtime_reasons r ON d.reason_id = r.reason_id
                 WHERE d.line_id=%s AND d.shift=%s AND d.started_at::date=%s
@@ -228,27 +232,26 @@ class ProductionLogger:
                   AND r.reason_code <> 'VARDIYA_SONU'
             """, (line_id, shift_code, d))
             dt_row = cur.fetchone()
-            total_dt = int(dt_row["total_dt"]) if dt_row else 0
+            excluded_dt = int(dt_row["excluded_dt"]) if dt_row else 0
+            unplanned_dt = int(dt_row["unplanned_dt"]) if dt_row else 0
 
             # ── Planlanan üretim süresi = VARDİYANIN TAM SÜRESİ (vardiya_1 → 10 saat) ──
             # OEE HER ZAMAN planlanan süreye göre hesaplanır; ilk/son baskı penceresine DEĞİL.
             # Geç başlama / erken bitiş kaybı ancak böyle yakalanır.
             # first_at / last_at yalnızca first_cycle_at / last_cycle_at kolonlarında saklanır.
-            shift_hours = 10
-            for sd in self.shift_detector.shifts:
-                if sd["code"] == shift_code:
-                    shift_hours = sd["end_hour"] - sd["start_hour"]
-                    if shift_hours <= 0:
-                        shift_hours += 24
-                    break
-            total_time = shift_hours * 3600          # vardiya_1 → 36000 sn
+            # ── Dinamik payda: window (taban) − OEE-hariç süreler (mola+vardiya sonu) ──
+            # Bitmiş vardiya özeti → pencere TAM taban (window_so_far değil).
+            import shift_utils
+            window = shift_utils.planned_seconds(shift_code)   # taban, örn. 36000 (10s)
+            total_time = window                                # raporda gösterilen tam pencere
 
-            available = max(total_time - total_dt, 1)
+            planned = max(window - excluded_dt, 60)            # mola paydadan düşülür
+            run_time = max(planned - unplanned_dt, 1)          # çalışma = payda − kayıp duruş
 
             # OEE
-            availability = min(available / total_time * 100, 100.0) if total_time > 0 else 0
+            availability = min(run_time / planned * 100, 100.0) if planned > 0 else 0
             ideal_sec = (avg_cycle / 10.0) if avg_cycle > 0 else 8.0   # ⚠ desisaniye → saniye
-            performance = (produced * ideal_sec / available * 100) if available > 0 else 0
+            performance = (produced * ideal_sec / run_time * 100) if run_time > 0 else 0
             performance = min(performance, 100.0)
             quality = (good / produced * 100) if produced > 0 else 100
             oee = availability * performance * quality / 10000
@@ -269,7 +272,7 @@ class ProductionLogger:
                     oee_quality=EXCLUDED.oee_quality, oee_overall=EXCLUDED.oee_overall,
                     first_cycle_at=EXCLUDED.first_cycle_at, last_cycle_at=EXCLUDED.last_cycle_at
             """, (line_id, d, shift_code, row["model_id"], target,
-                produced, scrap, good, avg_cycle, total_dt,
+                produced, scrap, good, avg_cycle, unplanned_dt,
                 round(availability, 1), round(performance, 1),
                 round(quality, 1), round(oee, 1),
                 first_at, last_at))
@@ -277,7 +280,7 @@ class ProductionLogger:
 
             logger.info(
                 f"[Hat {line_id}] Vardiya özeti yazıldı: {shift_code} {d} | "
-                f"Üretim:{produced} Fire:{scrap} Duruş:{total_dt//60}dk "
+                f"Üretim:{produced} Fire:{scrap} Duruş:{unplanned_dt//60}dk Mola:{excluded_dt//60}dk "
                 f"İlk:{first_at.strftime('%H:%M') if first_at else '?'} "
                 f"Son:{last_at.strftime('%H:%M') if last_at else '?'} "
                 f"OEE:{oee:.1f}%"
@@ -293,8 +296,9 @@ class ProductionLogger:
                 client.subscribe(f"{prefix}/uretim")
                 client.subscribe(f"{prefix}/cycle_time")
                 client.subscribe(f"{prefix}/makine_durumu")
-                client.subscribe(f"{prefix}/yag")  # ← YENİ
-                logger.info(f"  Abone: {prefix}/makine_durumu, {prefix}/uretim, {prefix}/cycle_time")
+                client.subscribe(f"{prefix}/yag")
+                client.subscribe(f"{prefix}/config")   # ← vardiya/ayar reload
+                logger.info(f"  Abone: {prefix}/makine_durumu, {prefix}/uretim, {prefix}/cycle_time, {prefix}/config")
 
     def _on_message(self, client, userdata, msg):
         try:
@@ -389,6 +393,9 @@ class ProductionLogger:
                         self._db_conn = None
             elif signal == "yag":
                 self._handle_oil_data(payload)
+            elif signal == "config":
+                shift_utils.invalidate()
+                logger.info(f"[Hat {line_id}] config reload — vardiya cache tazelendi")
         except json.JSONDecodeError: pass
         except Exception as e: logger.error(f"Mesaj: {e}")
 

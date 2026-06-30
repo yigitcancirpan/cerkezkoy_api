@@ -104,15 +104,9 @@ def calculate_summary_now(
     db: Session = Depends(get_db),
 ):
     """Manuel vardiya özeti — şu ana kadar olan verilerle hesapla"""
-    # Şu anki vardiyayı belirle
-    h = datetime.now().hour
-    if 8 <= h < 19:
-        shift_code = "vardiya_1"
-    elif 19 <= h or h < 3:
-        shift_code = "vardiya_2"
-    else:
-        shift_code = "vardiya_1"
-
+    """Manuel vardiya özeti — şu ana kadar olan verilerle hesapla"""
+    import shift_utils
+    shift_code = shift_utils.detect_shift_code()
     today = date.today()
 
     # Üretim verileri — production_current'tan
@@ -139,49 +133,45 @@ def calculate_summary_now(
     scrap = int(scrap_row[0]) if scrap_row else 0
     good = max(produced - scrap, 0)
 
-    # Duruş toplamı — VARDIYA_SONU hariç
+    # Duruşları ikiye ayır: OEE-hariç (mola+vardiya sonu, paydadan düşülür) ve
+    # gerçek kayıp (Availability'den düşülür). Kapalı→duration_sec, aktif→şu ana kadar.
     dt_row = db.execute(text("""
-        SELECT COALESCE(SUM(d.duration_sec), 0) as total_dt
+        SELECT
+          COALESCE(SUM(CASE WHEN r.exclude_from_oee THEN sec ELSE 0 END), 0) AS excluded_dt,
+          COALESCE(SUM(CASE WHEN NOT r.exclude_from_oee THEN sec ELSE 0 END), 0) AS unplanned_dt
         FROM downtimes d
         JOIN downtime_reasons r ON d.reason_id = r.reason_id
-        WHERE d.line_id = :lid AND d.started_at::date = :d AND d.is_active = FALSE
+        CROSS JOIN LATERAL (
+          SELECT CASE WHEN d.is_active
+                      THEN EXTRACT(EPOCH FROM (NOW() - d.started_at))::int
+                      ELSE COALESCE(d.duration_sec, 0) END AS sec
+        ) s
+        WHERE d.line_id = :lid
           AND r.reason_code <> 'VARDIYA_SONU'
+          AND ((d.is_active = FALSE AND d.started_at::date = :d) OR d.is_active = TRUE)
     """), {"lid": line_id, "d": today}).fetchone()
-    total_dt = dt_row[0] if dt_row else 0
-
-    # Aktif duruş süresi de ekle — VARDIYA_SONU hariç
-    active_dt = db.execute(text("""
-        SELECT COALESCE(
-            EXTRACT(EPOCH FROM (NOW() - d.started_at))::int, 0
-        ) as active_sec
-        FROM downtimes d
-        JOIN downtime_reasons r ON d.reason_id = r.reason_id
-        WHERE d.line_id = :lid AND d.is_active = TRUE
-          AND r.reason_code <> 'VARDIYA_SONU'
-    """), {"lid": line_id}).fetchone()
-    if active_dt:
-        total_dt += active_dt[0]
+    excluded_dt = int(dt_row[0]) if dt_row else 0
+    unplanned_dt = int(dt_row[1]) if dt_row else 0
 
     # Çalışma süresi hesapla
     # ── Planlanan süre: vardiya başlangıcından ŞİMDİYE kadar ──
+    # ── Dinamik payda: window (taban) − OEE-hariç süreler ──
+    sh = shift_utils.shift_by_code(shift_code)
+    window = shift_utils.planned_seconds(shift_code)       # taban, örn. 36000 (10s)
+
     now_dt = datetime.now()
-    if shift_code == "vardiya_1":
-        shift_start = now_dt.replace(hour=8, minute=0, second=0, microsecond=0)
-        full_shift_sec = 10 * 3600
-    else:  # vardiya_2 (18:00 → 24:00)
-        shift_start = now_dt.replace(hour=18, minute=0, second=0, microsecond=0)
-        if now_dt.hour < 18:
-            shift_start -= timedelta(days=1)
-        full_shift_sec = 6 * 3600
-
+    shift_start = now_dt.replace(hour=sh["start_hour"], minute=0, second=0, microsecond=0)
+    if now_dt < shift_start:
+        shift_start -= timedelta(days=1)
     elapsed = (now_dt - shift_start).total_seconds()
-    total_time = max(min(elapsed, full_shift_sec), 60)   # vardiya başından önce/sonra sınırla
+    window_so_far = max(min(elapsed, window), 60)          # vardiya başından şimdiye, taban ile sınırlı
 
-    available = max(total_time - total_dt, 1)
+    planned = max(window_so_far - excluded_dt, 60)         # mola/vardiya sonu paydadan düşülür
+    run_time = max(planned - unplanned_dt, 1)              # gerçek çalışma = payda − kayıp duruş
 
-    availability = min(available / total_time * 100, 100.0) if total_time > 0 else 0
+    availability = min(run_time / planned * 100, 100.0) if planned > 0 else 0
     ideal = avg_cycle / 10.0 if avg_cycle > 0 else 8.0
-    performance = min((produced * ideal / available * 100) if available > 0 else 0, 100.0)
+    performance = min((produced * ideal / run_time * 100) if run_time > 0 else 0, 100.0)
     quality = (good / produced * 100) if produced > 0 else 100
     oee = availability * performance * quality / 10000
 
@@ -199,9 +189,11 @@ def calculate_summary_now(
         "avg_cycle_time": avg_cycle,
         "first_cycle_at": str(c.get("first_cycle_at")) if c.get("first_cycle_at") else None,
         "last_cycle_at": str(c.get("last_cycle_at")) if c.get("last_cycle_at") else None,
-        "total_time_min": round(total_time / 60),
-        "downtime_min": round(total_dt / 60),
-        "available_min": round(available / 60),
+        "total_time_min": round(window_so_far / 60),
+        "planned_min": round(planned / 60),
+        "downtime_min": round(unplanned_dt / 60),
+        "break_min": round(excluded_dt / 60),
+        "available_min": round(run_time / 60),
         "oee": {
             "availability": round(availability, 1),
             "performance": round(performance, 1),
