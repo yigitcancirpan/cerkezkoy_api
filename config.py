@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore"   # DB_URL, SITE_CODE gibi servis-ortak değişkenleri yok say
 
 
 settings = Settings()

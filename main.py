@@ -7,7 +7,7 @@ from config import settings
 from models.database import engine, Base
 from models.downtime_models import Downtime, DowntimeReason
 from services.mqtt_service import mqtt_service
-from routers import sensors, machines, alerts, batch_transfer, websocket_router
+from routers import sensors, machines, alerts, batch_transfer, websocket_router, assignments
 from routers import downtimes, production, health, oil, scrap, reports, settings as settings_router
 
 @asynccontextmanager
@@ -44,6 +44,7 @@ app.include_router(oil.router)
 app.include_router(scrap.router)
 app.include_router(reports.router)
 app.include_router(settings_router.router)
+app.include_router(assignments.router)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 

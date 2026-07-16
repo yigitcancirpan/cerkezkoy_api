@@ -669,7 +669,7 @@ if __name__ == "__main__":
     ]
 
     svc = ProductionLogger(
-        db_url=os.getenv("DB_URL", "postgresql://yigitcanc:***REMOVED***@127.0.0.1:5432/cerkezkoy_db"),
+        db_url=os.environ["DB_URL"],  
         mqtt_host=os.getenv("MQTT_HOST", "127.0.0.1"),
         log_interval_sec=int(os.getenv("LOG_INTERVAL", "60")),
         shifts_config=shifts,

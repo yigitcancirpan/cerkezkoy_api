@@ -6,3 +6,5 @@ __pycache__/
 backups/
 *.sql.gz
 readMe.txt
+config.py
+
