@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hat Kurulumu — Fabrika IoT</title>
+<style>
+  /* Air-gap: font import YOK — sistem fontları. DM Sans lokalde varsa aşağıdaki
+     @font-face bloğunu açıp /static/fonts/ altına woff2 koyabilirsin. */
+  *{margin:0;padding:0;box-sizing:border-box;}
+  :root{--bg:#0a0e17;--card:#111827;--card2:#1a2035;--border:#1e293b;--text:#e2e8f0;--dim:#64748b;--green:#10b981;--blue:#3b82f6;--red:#ef4444;--amber:#f59e0b;--purple:#8b5cf6;--cyan:#06b6d4;}
+  body{background:var(--bg);color:var(--text);font-family:'DM Sans','Segoe UI',sans-serif;min-height:100vh;padding:16px;}
+  .mono{font-family:'JetBrains Mono','Consolas',monospace;}
+
+  .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;}
+  .top h1{font-size:18px;font-weight:900;}
+  .top h1 span{color:var(--green);}
+  .top-right{display:flex;gap:8px;align-items:center;}
+  .badge{padding:4px 10px;border-radius:6px;font-size:10px;font-weight:700;}
+  .clock{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--dim);}
+
+  /* ── PRES KARTLARI ── */
+  .press-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px;}
+  @media(max-width:900px){.press-grid{grid-template-columns:1fr;}}
+
+  .press-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px;position:relative;transition:border-color .2s;}
+  .press-card.running{border-color:var(--green);}
+  .press-card.idle{border-color:var(--border);}
+  .press-card.idle .press-name{color:var(--dim);}
+
+  .press-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;}
+  .press-name{font-size:16px;font-weight:900;}
+  .press-status{display:flex;align-items:center;gap:6px;font-size:10px;font-weight:700;letter-spacing:1px;}
+  .dot{width:8px;height:8px;border-radius:50%;}
+  .dot-green{background:var(--green);box-shadow:0 0 8px var(--green);}
+  .dot-gray{background:var(--dim);}
+
+  .mat-block{background:var(--card2);border-radius:8px;padding:12px;margin-bottom:10px;}
+  .mat-code{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--cyan);font-weight:700;}
+  .mat-name{font-size:15px;font-weight:700;margin:2px 0 8px;}
+  .mat-meta{display:flex;gap:14px;flex-wrap:wrap;}
+  .mat-meta div{font-size:11px;color:var(--dim);}
+  .mat-meta b{color:var(--text);font-family:'JetBrains Mono',monospace;}
+
+  .idle-block{background:var(--card2);border:1px dashed var(--border);border-radius:8px;padding:20px;text-align:center;color:var(--dim);font-size:13px;margin-bottom:10px;}
+
+  .btn{width:100%;padding:11px;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:opacity .2s;}
+  .btn:hover{opacity:.88;} .btn:active{opacity:.7;} .btn:disabled{opacity:.35;cursor:not-allowed;}
+  .btn-assign{background:linear-gradient(135deg,var(--blue),var(--purple));color:#fff;}
+  .btn-change{background:var(--card2);color:var(--amber);border:1px solid var(--amber);}
+  .btn-end{background:var(--card2);color:var(--red);border:1px solid var(--red);margin-top:6px;}
+
+  .btn-row{display:flex;gap:6px;}
+  .btn-row .btn{flex:1;margin-top:0;}
+
+  /* ── MALZEME LİSTESİ (alt panel) ── */
+  .section-title{font-size:11px;letter-spacing:2px;color:var(--dim);text-transform:uppercase;margin:4px 0 10px;}
+  .mat-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;}
+  .mat-item{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;}
+  .mat-item .tag{display:inline-block;font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;margin-top:6px;}
+  .tag-prod{background:rgba(16,185,129,.15);color:var(--green);}
+  .tag-free{background:var(--card2);color:var(--dim);}
+
+  /* ── MODAL ── */
+  .overlay{display:none;position:fixed;inset:0;background:rgba(4,6,12,.8);z-index:50;align-items:center;justify-content:center;padding:16px;}
+  .overlay.open{display:flex;}
+  .modal{background:var(--card);border:1px solid var(--border);border-radius:14px;width:100%;max-width:520px;max-height:88vh;overflow-y:auto;padding:20px;}
+  .modal h2{font-size:16px;margin-bottom:4px;}
+  .modal .sub{font-size:12px;color:var(--dim);margin-bottom:14px;}
+
+  .pick-list{display:flex;flex-direction:column;gap:8px;margin-bottom:14px;max-height:340px;overflow-y:auto;}
+  .pick{background:var(--card2);border:2px solid transparent;border-radius:10px;padding:12px;cursor:pointer;transition:border-color .15s;}
+  .pick:hover{border-color:var(--blue);}
+  .pick.selected{border-color:var(--green);background:rgba(16,185,129,.08);}
+  .pick .row1{display:flex;justify-content:space-between;align-items:center;}
+  .pick .warn{font-size:10px;color:var(--amber);margin-top:4px;}
+
+  .field{margin-bottom:12px;}
+  .field label{display:block;font-size:10px;letter-spacing:1px;color:var(--dim);text-transform:uppercase;margin-bottom:5px;}
+  .field input{width:100%;background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:14px;}
+  .field input:focus{outline:none;border-color:var(--blue);}
+  .field-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+
+  .modal-actions{display:flex;gap:8px;margin-top:6px;}
+  .btn-cancel{background:var(--card2);color:var(--dim);}
+  .btn-ok{background:linear-gradient(135deg,var(--green),var(--cyan));color:#04121a;}
+
+  /* ── TOAST ── */
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--card2);border:1px solid var(--green);color:var(--text);padding:12px 22px;border-radius:10px;font-size:13px;font-weight:700;z-index:99;display:none;}
+  .toast.err{border-color:var(--red);}
+  .toast.show{display:block;animation:tpop .25s;}
+  @keyframes tpop{from{opacity:0;transform:translateX(-50%) translateY(8px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}
+
+  .footer{text-align:center;color:var(--dim);font-size:10px;margin-top:16px;}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <h1>⚙ Hat <span>Kurulumu</span></h1>
+  <div class="top-right">
+    <span class="badge" style="background:var(--blue);color:#fff;">Qs Hattı</span>
+    <a class="badge" href="/static/dashboard.html" style="background:var(--purple);color:#fff;text-decoration:none;">📊 Dashboard</a>
+    <span class="clock" id="clock">--:--:--</span>
+  </div>
+</div>
+
+<!-- PRES KARTLARI -->
+<div class="press-grid" id="pressGrid">
+  <!-- JS ile doldurulur -->
+</div>
+
+<!-- MALZEME HAVUZU -->
+<div class="section-title">Malzeme Havuzu</div>
+<div class="mat-list" id="matList"></div>
+
+<!-- ATAMA MODALI -->
+<div class="overlay" id="assignOverlay">
+  <div class="modal">
+    <h2 id="modalTitle">Malzeme Ata</h2>
+    <div class="sub" id="modalSub">Prese atanacak malzemeyi seç</div>
+
+    <div class="pick-list" id="pickList"></div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Hedef Adet</label>
+        <input type="number" id="fTarget" min="0" placeholder="Varsayılan">
+      </div>
+      <div class="field">
+        <label>Lot No (opsiyonel)</label>
+        <input type="number" id="fLot" min="0" placeholder="—">
+      </div>
+    </div>
+    <div class="field">
+      <label>Operatör (opsiyonel)</label>
+      <input type="text" id="fOperator" maxlength="100" placeholder="Ad Soyad">
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal()">İptal</button>
+      <button class="btn btn-ok" id="btnConfirm" onclick="confirmAssign()" disabled>Ata</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="footer">Fabrika IoT — Hat Kurulum Ekranı</div>
+
+<script>
+const API = '';           // aynı origin — dashboard.html ile aynı kullanım
+const LID = 1;
+
+let board = { presses: [], materials: [] };
+let modalMachineId = null;
+let selectedMaterialId = null;
+
+// ── SAAT ──
+setInterval(() => {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('tr-TR');
+}, 1000);
+
+// ── SÜRE FORMATLAMA ──
+function fmtDur(sec) {
+  sec = Math.max(sec || 0, 0);
+  if (sec < 3600) return Math.floor(sec / 60) + ' dk';
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+  return h + ' sa ' + m + ' dk';
+}
+
+// ── TOAST ──
+let toastTimer = null;
+function toast(msg, isErr = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isErr ? ' err' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.className = 'toast', 3500);
+}
+
+// ── BOARD YÜKLE ──
+async function loadBoard() {
+  try {
+    const r = await fetch(`${API}/api/v1/assignments/board?line_id=${LID}`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    board = await r.json();
+    renderPresses();
+    renderMaterials();
+  } catch (e) {
+    toast('Board yüklenemedi: ' + e.message, true);
+  }
+}
+
+// ── PRES KARTLARINI ÇİZ ──
+function renderPresses() {
+  const grid = document.getElementById('pressGrid');
+  grid.innerHTML = board.presses.map(p => {
+    const a = p.assignment;
+    if (a) {
+      const cyc = a.ideal_cycle_ds ? (a.ideal_cycle_ds / 10).toFixed(1) + ' sn' : '—';
+      return `
+      <div class="press-card running">
+        <div class="press-head">
+          <div class="press-name">${esc(p.machine_name)}</div>
+          <div class="press-status" style="color:var(--green);">
+            <div class="dot dot-green"></div>ÜRETİMDE
+          </div>
+        </div>
+        <div class="mat-block">
+          <div class="mat-code">${esc(a.material_code)}</div>
+          <div class="mat-name">${esc(a.material_name)}</div>
+          <div class="mat-meta">
+            <div>Hedef <b>${a.target || '—'}</b></div>
+            <div>Cycle <b>${cyc}</b></div>
+            <div>Lot <b>${a.lot_number ?? '—'}</b></div>
+            <div>Süre <b>${fmtDur(a.running_sec)}</b></div>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-change" onclick="openModal(${p.machine_id}, true)">⇄ Malzeme Değiştir</button>
+        </div>
+        <button class="btn btn-end" onclick="endAssignment(${a.assignment_id}, '${esc(p.machine_name)}')">■ Üretimi Bitir</button>
+      </div>`;
+    }
+    return `
+    <div class="press-card idle">
+      <div class="press-head">
+        <div class="press-name">${esc(p.machine_name)}</div>
+        <div class="press-status" style="color:var(--dim);">
+          <div class="dot dot-gray"></div>BOŞTA
+        </div>
+      </div>
+      <div class="idle-block">Malzeme atanmadı</div>
+      <button class="btn btn-assign" onclick="openModal(${p.machine_id}, false)">+ Malzeme Ata</button>
+    </div>`;
+  }).join('');
+}
+
+// ── MALZEME HAVUZU ──
+function renderMaterials() {
+  const list = document.getElementById('matList');
+  if (!board.materials.length) {
+    list.innerHTML = '<div style="color:var(--dim);font-size:12px;">Aktif malzeme yok — API üzerinden ekleyin (POST /api/v1/assignments/materials)</div>';
+    return;
+  }
+  list.innerHTML = board.materials.map(m => `
+    <div class="mat-item">
+      <div class="mat-code">${esc(m.material_code)}</div>
+      <div style="font-size:13px;font-weight:700;margin:2px 0;">${esc(m.material_name)}</div>
+      <div style="font-size:10px;color:var(--dim);">
+        Hedef ${m.default_target || '—'} ·
+        Cycle ${m.ideal_cycle_ds ? (m.ideal_cycle_ds / 10).toFixed(1) + 'sn' : '—'}
+      </div>
+      <span class="tag ${m.in_production ? 'tag-prod' : 'tag-free'}">
+        ${m.in_production ? '● ÜRETİMDE' : '○ MÜSAİT'}
+      </span>
+    </div>`).join('');
+}
+
+// ── MODAL ──
+function openModal(machineId, isChange) {
+  modalMachineId = machineId;
+  selectedMaterialId = null;
+  const press = board.presses.find(p => p.machine_id === machineId);
+  document.getElementById('modalTitle').textContent =
+    (isChange ? 'Malzeme Değiştir — ' : 'Malzeme Ata — ') + press.machine_name;
+  document.getElementById('modalSub').textContent =
+    isChange ? 'Mevcut atama otomatik kapatılıp yenisi başlatılır' : 'Prese atanacak malzemeyi seç';
+  document.getElementById('fTarget').value = '';
+  document.getElementById('fLot').value = '';
+  document.getElementById('fOperator').value = '';
+  document.getElementById('btnConfirm').disabled = true;
+
+  const currentMatId = press.assignment ? press.assignment.material_id : null;
+  document.getElementById('pickList').innerHTML = board.materials
+    .filter(m => m.material_id !== currentMatId)
+    .map(m => `
+      <div class="pick" id="pick_${m.material_id}" onclick="pickMaterial(${m.material_id})">
+        <div class="row1">
+          <div>
+            <span class="mat-code">${esc(m.material_code)}</span>
+            <span style="font-size:13px;font-weight:700;margin-left:8px;">${esc(m.material_name)}</span>
+          </div>
+          <span style="font-size:11px;color:var(--dim);" class="mono">${m.default_target || '—'} adet</span>
+        </div>
+        ${m.in_production ? '<div class="warn">⚠ Bu malzeme şu an başka bir preste üretimde</div>' : ''}
+      </div>`).join('') ||
+    '<div style="color:var(--dim);font-size:12px;">Seçilebilir malzeme yok</div>';
+
+  document.getElementById('assignOverlay').classList.add('open');
+}
+
+function pickMaterial(id) {
+  selectedMaterialId = id;
+  document.querySelectorAll('.pick').forEach(el => el.classList.remove('selected'));
+  document.getElementById('pick_' + id).classList.add('selected');
+  const m = board.materials.find(x => x.material_id === id);
+  const tgtInput = document.getElementById('fTarget');
+  if (!tgtInput.value) tgtInput.placeholder = 'Varsayılan: ' + (m.default_target || 0);
+  document.getElementById('btnConfirm').disabled = false;
+}
+
+function closeModal() {
+  document.getElementById('assignOverlay').classList.remove('open');
+  modalMachineId = null;
+  selectedMaterialId = null;
+}
+// Overlay dışına tıklayınca kapat
+document.getElementById('assignOverlay').addEventListener('click', e => {
+  if (e.target.id === 'assignOverlay') closeModal();
+});
+
+// ── ATAMA ONAY ──
+async function confirmAssign() {
+  if (!modalMachineId || !selectedMaterialId) return;
+  const btn = document.getElementById('btnConfirm');
+  btn.disabled = true; btn.textContent = 'Atanıyor…';
+  try {
+    const body = {
+      machine_id: modalMachineId,
+      material_id: selectedMaterialId,
+      target: parseInt(document.getElementById('fTarget').value) || null,
+      lot_number: parseInt(document.getElementById('fLot').value) || null,
+      operator_name: document.getElementById('fOperator').value.trim() || null,
+    };
+    const r = await fetch(`${API}/api/v1/assignments/assign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'HTTP ' + r.status);
+    toast('✓ ' + data.message);
+    closeModal();
+    await loadBoard();
+  } catch (e) {
+    toast('Atama başarısız: ' + e.message, true);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Ata';
+  }
+}
+
+// ── ATAMA BİTİR ──
+async function endAssignment(assignmentId, pressName) {
+  if (!confirm(pressName + ' üzerindeki üretim bitirilsin mi?\nPres boşa çıkacak.')) return;
+  try {
+    const r = await fetch(`${API}/api/v1/assignments/${assignmentId}/end`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notes: 'Kurulum ekranından bitirildi' }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'HTTP ' + r.status);
+    toast('✓ ' + data.message);
+    await loadBoard();
+  } catch (e) {
+    toast('Bitirilemedi: ' + e.message, true);
+  }
+}
+
+// ── XSS koruması (operatör adı, malzeme adı DB'den geliyor) ──
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// ── BAŞLAT ──
+loadBoard();
+setInterval(loadBoard, 10000);   // 10sn'de bir tazele (running_sec güncellensin)
+</script>
+</body>
+</html>

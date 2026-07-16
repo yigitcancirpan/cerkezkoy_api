@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tora Makina — Üretim Hatları</title>
+<style>
+  :root{
+    --bg:#0a0e17; --panel:#111827; --panel2:#0f1522;
+    --border:#1f2a3d; --text:#e5eaf3; --muted:#8b98ad;
+    --green:#22c55e; --red:#ef4444; --amber:#f59e0b; --blue:#3b82f6;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:'DM Sans', system-ui, -apple-system, sans-serif;
+    min-height:100vh; padding:24px;
+  }
+  header{
+    display:flex; justify-content:space-between; align-items:baseline;
+    max-width:1100px; margin:0 auto 20px;
+  }
+  header h1{font-size:20px; font-weight:600; letter-spacing:.3px}
+  header h1 span{color:var(--muted); font-weight:400}
+  #clock{font-size:14px; color:var(--muted); font-variant-numeric:tabular-nums}
+
+  .wrap{max-width:1100px; margin:0 auto}
+
+  table{
+    width:100%; border-collapse:collapse;
+    background:var(--panel); border:1px solid var(--border);
+    border-radius:12px; overflow:hidden;
+  }
+  thead th{
+    text-align:left; font-size:11px; font-weight:600; letter-spacing:1px;
+    text-transform:uppercase; color:var(--muted);
+    padding:12px 16px; background:var(--panel2);
+    border-bottom:1px solid var(--border);
+  }
+  tbody tr{
+    cursor:pointer; transition:background .15s;
+    border-bottom:1px solid var(--border);
+  }
+  tbody tr:last-child{border-bottom:none}
+  tbody tr:hover{background:#16203280}
+  td{padding:16px; font-size:15px; vertical-align:middle}
+
+  .line-name{font-weight:600; display:flex; align-items:center; gap:10px}
+  .dot{width:9px; height:9px; border-radius:50%; flex-shrink:0}
+  .dot.run{background:var(--green); box-shadow:0 0 8px var(--green)}
+  .dot.stop{background:var(--red)}
+  .dot.idle{background:var(--muted)}
+
+  .num{font-variant-numeric:tabular-nums; font-weight:600; font-size:17px}
+  .target{color:var(--muted); font-weight:400; font-size:13px}
+  .material{color:var(--text)}
+  .material small{display:block; color:var(--muted); font-size:12px; margin-top:2px}
+  .last{color:var(--muted); font-size:13px; font-variant-numeric:tabular-nums}
+  .go{color:var(--muted); font-size:18px; text-align:right}
+
+  .bar{height:4px; background:var(--border); border-radius:2px; margin-top:8px; overflow:hidden; max-width:160px}
+  .bar i{display:block; height:100%; background:var(--blue); border-radius:2px}
+
+  .err{
+    max-width:1100px; margin:12px auto 0; padding:10px 14px;
+    background:#2a1215; border:1px solid #7f1d1d; border-radius:8px;
+    color:#fca5a5; font-size:13px; display:none;
+  }
+  @media (max-width:640px){
+    body{padding:12px}
+    td,thead th{padding:10px}
+    .last-col{display:none}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>TORA MAKİNA <span>· Çerkezköy Üretim Hatları</span></h1>
+  <div id="clock">--:--:--</div>
+</header>
+
+<div class="wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Hat</th>
+        <th>Malzeme</th>
+        <th>Üretim</th>
+        <th class="last-col">Son Baskı</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+<div class="err" id="err"></div>
+
+<script>
+/* ═══════════ KONFİGÜRASYON — projene göre burayı düzenle ═══════════ */
+const API = window.location.origin;
+const LINES = [
+  { id: 1, name: 'Qs Hattı' },
+  { id: 2, name: 'Hat 2'   },
+];
+const PROD_EP = id => `${API}/api/v1/production/current/${id}`;
+// production/current yanıtında malzeme bilgisi yoksa atama endpoint'ini aç:
+const ASSIGN_EP = null; // örn: id => `${API}/api/v1/assignments/active/${id}`
+const REFRESH_MS = 5000;
+const STALL_SEC  = 120;   // son baskı bundan eskiyse STOP say
+/* ═══════════════════════════════════════════════════════════════════ */
+
+const rowsEl = document.getElementById('rows');
+const errEl  = document.getElementById('err');
+
+function fmtTime(iso){
+  if(!iso) return '—';
+  const d = new Date(iso);
+  if(isNaN(d)) return '—';
+  return d.toLocaleTimeString('tr-TR', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+}
+
+function statusOf(d){
+  // Öncelik: payload'daki production_state; yoksa son baskı yaşından türet
+  if (d && typeof d.production_state === 'boolean')
+    return d.production_state ? 'run' : 'stop';
+  if (d && d.last_cycle_at){
+    const age = (Date.now() - new Date(d.last_cycle_at).getTime()) / 1000;
+    if (isNaN(age)) return 'idle';
+    return age < STALL_SEC ? 'run' : 'stop';
+  }
+  return 'idle';
+}
+
+function materialOf(prod, assign){
+  const a = assign || {};
+  const p = prod   || {};
+  const name = a.material_name || a.material_code || p.material_name
+            || p.model_id || p.lot_number || null;
+  const sub  = (a.material_name && a.material_code) ? a.material_code
+             : (p.model_id && p.lot_number) ? `Lot: ${p.lot_number}` : '';
+  return { name: name || '—', sub };
+}
+
+async function fetchJson(url){
+  const r = await fetch(url);
+  if(!r.ok) throw new Error(`${url} → HTTP ${r.status}`);
+  return r.json();
+}
+
+function render(states){
+  rowsEl.innerHTML = states.map(s => {
+    const st  = statusOf(s.prod);
+    const mat = materialOf(s.prod, s.assign);
+    const produced = s.prod?.produced ?? s.prod?.shift_produced ?? '—';
+    const target   = s.prod?.target ?? null;
+    const pct = (target && produced !== '—') ? Math.min(100, Math.round(produced/target*100)) : null;
+    return `
+    <tr onclick="location.href='dashboard.html?line=${s.id}'">
+      <td>
+        <div class="line-name"><span class="dot ${st}"></span>${s.name}</div>
+      </td>
+      <td class="material">${mat.name}${mat.sub ? `<small>${mat.sub}</small>` : ''}</td>
+      <td>
+        <span class="num">${produced}</span>
+        ${target ? `<span class="target"> / ${target}</span>` : ''}
+        ${pct !== null ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ''}
+      </td>
+      <td class="last-col last">${fmtTime(s.prod?.last_cycle_at)}</td>
+      <td class="go">›</td>
+    </tr>`;
+  }).join('');
+}
+
+async function refresh(){
+  const states = await Promise.all(LINES.map(async l => {
+    const out = { id: l.id, name: l.name, prod: null, assign: null };
+    try { out.prod = await fetchJson(PROD_EP(l.id)); } catch(e){ /* hat verisi yoksa boş göster */ }
+    if (ASSIGN_EP){
+      try { out.assign = await fetchJson(ASSIGN_EP(l.id)); } catch(e){}
+    }
+    return out;
+  }));
+  const anyOk = states.some(s => s.prod);
+  errEl.style.display = anyOk ? 'none' : 'block';
+  if(!anyOk) errEl.textContent = 'API\'den veri alınamadı — cerkezkoy_api servisini kontrol edin.';
+  render(states);
+}
+
+function tick(){
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('tr-TR');
+}
+
+tick(); setInterval(tick, 1000);
+refresh(); setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>
