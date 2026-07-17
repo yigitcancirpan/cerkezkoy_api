@@ -19,17 +19,20 @@ router = APIRouter(prefix="/api/v1/oil", tags=["Yağ Takibi"])
 
 
 @router.get("/current")
-def get_current(db: Session = Depends(get_db)):
-    """6 presin son okunan değerleri + 24h min/max"""
-    rows = db.execute(text("""
-        SELECT press_id, level, temperature,
+def get_current(line_id: Optional[int] = Query(None), db: Session = Depends(get_db)):
+    """Preslerin son okunan değerleri + 24h min/max (opsiyonel hat filtresi)"""
+    where = "WHERE line_id = :lid" if line_id else ""
+    params = {"lid": line_id} if line_id else {}
+    rows = db.execute(text(f"""
+        SELECT press_id, line_id, level, temperature,
                level_min_24h, level_max_24h,
                temp_min_24h, temp_max_24h,
                updated_at,
                EXTRACT(EPOCH FROM (NOW() - updated_at))::int as age_sec
         FROM press_oil_current
+        {where}
         ORDER BY press_id
-    """)).fetchall()
+    """), params).fetchall()
     
     return {
         "presses": [dict(r._mapping) for r in rows],
@@ -40,6 +43,7 @@ def get_current(db: Session = Depends(get_db)):
 @router.get("/history")
 def get_history(
     press_id: Optional[int] = Query(None, description="Tek pres için filtrele"),
+    line_id: Optional[int] = Query(None),
     hours: int = Query(24, ge=1, le=720, description="Kaç saatlik veri"),
     db: Session = Depends(get_db),
 ):

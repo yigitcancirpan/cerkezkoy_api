@@ -157,7 +157,7 @@
 
 <script>
 const API = window.location.origin;
-const LID = 1;
+const LID = parseInt(new URLSearchParams(location.search).get('line') || '1');
 const PRESS = {
   1: {color:'var(--cyan)',   tag:'88-470'},
   2: {color:'var(--amber)',  tag:'95-470'},

@@ -17,7 +17,7 @@ def _publish_config_reload():
         import paho.mqtt.publish as publish
         import json, time
         publish.single(
-            "fabrika/hat1/config",
+            "fabrika/config",   # hat bağımsız — tüm servisler dinler
             payload=json.dumps({"reload": True, "ts": time.time()}),
             hostname="127.0.0.1", port=1883,
         )
@@ -48,11 +48,13 @@ def get_settings(db: Session = Depends(get_db)):
 
 
 @router.put("/{key}")
-def set_setting(key: str, body: SettingValue, db: Session = Depends(get_db)):
+def set_setting(key: str, body: SettingValue, scope: str = "global",
+                db: Session = Depends(get_db)):
     db.execute(text("""
-        INSERT INTO system_settings (key, value, updated_at) VALUES (:k, :v, NOW())
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-    """), {"k": key, "v": body.value})
+        INSERT INTO system_settings (key, value, scope, updated_at)
+        VALUES (:k, :v, :s, NOW())
+        ON CONFLICT (key, scope) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+    """), {"k": key, "v": body.value, "s": scope})
     db.commit()
     return {"key": key, "value": body.value}
 

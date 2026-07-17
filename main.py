@@ -7,7 +7,7 @@ from config import settings
 from models.database import engine, Base
 from models.downtime_models import Downtime, DowntimeReason
 from services.mqtt_service import mqtt_service
-from routers import sensors, machines, alerts, batch_transfer, websocket_router, assignments
+from routers import sensors, machines, alerts, batch_transfer, websocket_router, assignments, lines
 from routers import downtimes, production, health, oil, scrap, reports, settings as settings_router
 
 @asynccontextmanager
@@ -45,8 +45,16 @@ app.include_router(scrap.router)
 app.include_router(reports.router)
 app.include_router(settings_router.router)
 app.include_router(assignments.router)
+app.include_router(lines.router)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.middleware("http")
+async def static_no_cache(request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/static"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 @app.get("/", tags=["Sistem"])
 async def root():

@@ -28,36 +28,10 @@ import shift_utils
 logger = logging.getLogger("production_logger")
 
 
-DEFAULT_SHIFTS = [
-    {
-        "code": "vardiya_1", "label": "1. Vardiya",
-        "start_hour": 8, "end_hour": 18,
-        "earliest_end": 17, "latest_end": 19,
-    },
-    {
-        "code": "vardiya_2", "label": "2. Vardiya",
-        "start_hour": 18, "end_hour": 24,
-        "earliest_end": 23, "latest_end": 1,
-    },
-]
 
 
-class ShiftDetector:
-    def __init__(self, shifts=None):
-        self.shifts = shifts or DEFAULT_SHIFTS
 
-    def current_shift(self):
-        h = datetime.now().hour
-        for s in self.shifts:
-            start, latest = s["start_hour"], s["latest_end"]
-            if start > latest:
-                if h >= start or h < latest: return s
-            else:
-                if start <= h < latest: return s
-        return self.shifts[0]
 
-    def current_code(self): return self.current_shift()["code"]
-    def current_label(self): return self.current_shift()["label"]
 
 
 class LineState:
@@ -99,7 +73,7 @@ class ProductionLogger:
         self.mqtt_port = mqtt_port
         self.log_interval = log_interval_sec
 
-        self.shift_detector = ShiftDetector(shifts_config)
+        
         lines_config = lines_config or [{"line_id": 1, "mqtt_prefix": "fabrika/hat1"}]
 
         self.prefix_to_line = {}
@@ -169,7 +143,7 @@ class ProductionLogger:
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
             """, (line_id, s.lot_number, s.model_id, s.target, s.produced,
                   s.scrap, s.good, s.actual_cycle, s.average_cycle,
-                  self.shift_detector.current_code()))
+                  shift_utils.detect_shift_code()))
             cur.close()
         except Exception as e:
             logger.error(f"log write: {e}"); self._db_conn = None
@@ -292,12 +266,13 @@ class ProductionLogger:
     def _on_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
             logger.info("MQTT bağlantısı kuruldu")
+            client.subscribe("fabrika/config")         # hat bağımsız reload
             for prefix in self.prefix_to_line:
                 client.subscribe(f"{prefix}/uretim")
                 client.subscribe(f"{prefix}/cycle_time")
                 client.subscribe(f"{prefix}/makine_durumu")
                 client.subscribe(f"{prefix}/yag")
-                client.subscribe(f"{prefix}/config")   # ← vardiya/ayar reload
+                client.subscribe(f"{prefix}/config")   # geriye uyumluluk, sonra kaldırılır
                 logger.info(f"  Abone: {prefix}/makine_durumu, {prefix}/uretim, {prefix}/cycle_time, {prefix}/config")
 
     def _on_message(self, client, userdata, msg):
@@ -327,7 +302,7 @@ class ProductionLogger:
 
                 # Vardiya/gün değişimi tespiti
                 now = datetime.now()
-                current_shift = self.shift_detector.current_code()
+                current_shift = shift_utils.detect_shift_code()
                 today = now.strftime("%Y-%m-%d")
                 shift_key = f"{today}_{current_shift}"
 
@@ -392,7 +367,7 @@ class ProductionLogger:
                         logger.error(f"durum update: {e}")
                         self._db_conn = None
             elif signal == "yag":
-                self._handle_oil_data(payload)
+                self._handle_oil_data(line_id, payload)
             elif signal == "config":
                 shift_utils.invalidate()
                 logger.info(f"[Hat {line_id}] config reload — vardiya cache tazelendi")
@@ -419,7 +394,7 @@ class ProductionLogger:
             try:
                 now = datetime.now()
                 
-                for shift in self.shift_detector.shifts:
+                for shift in shift_utils.get_shifts():
                     shift_code = shift["code"]
                     
                     # Bu vardiyanın hangi tarihe ait olduğunu ve bitip bitmediğini hesapla
@@ -508,7 +483,7 @@ class ProductionLogger:
         for day_offset in range(days_back, -1, -1):
             check_date = today - timedelta(days=day_offset)
             
-            for shift in self.shift_detector.shifts:
+            for shift in shift_utils.get_shifts():
                 shift_code = shift["code"]
                 
                 # Bu gün için bu vardiya bitmiş mi?
@@ -527,7 +502,7 @@ class ProductionLogger:
                     )
                     self._write_shift_summary(line_id, shift_code, check_date)
     
-    def _handle_oil_data(self, payload):
+    def _handle_oil_data(self, line_id, payload):
         """Yağ verisini DB'ye yaz — değişim eşiği + heartbeat ile"""
         now = time.time()
         
@@ -551,13 +526,14 @@ class ProductionLogger:
                 # 1) press_oil_current'ı HER ZAMAN güncelle (anlık görünüm)
                 cur.execute("""
                     INSERT INTO press_oil_current 
-                        (press_id, level, temperature, updated_at)
-                    VALUES (%s, %s, %s, NOW())
+                        (press_id, line_id, level, temperature, updated_at)
+                    VALUES (%s, %s, %s, %s, NOW())
                     ON CONFLICT (press_id) DO UPDATE SET
+                        line_id = EXCLUDED.line_id,
                         level = EXCLUDED.level,
                         temperature = EXCLUDED.temperature,
                         updated_at = NOW()
-                """, (press_id, level, temp))
+                """, (press_id, line_id, level, temp))
                 
                 # 2) press_oil (geçmiş) — eşik/heartbeat kontrolü
                 should_write = False
@@ -581,9 +557,9 @@ class ProductionLogger:
                 
                 if should_write:
                     cur.execute("""
-                        INSERT INTO press_oil (press_id, level, temperature, recorded_at)
-                        VALUES (%s, %s, %s, NOW())
-                    """, (press_id, level, temp))
+                        INSERT INTO press_oil (press_id, line_id, level, temperature, recorded_at)
+                        VALUES (%s, %s, %s, %s, NOW())
+                    """, (press_id, line_id, level, temp))
                     state.last_db_write = now
                     state.last_db_level = level
                     state.last_db_temp = temp
@@ -633,12 +609,12 @@ class ProductionLogger:
     # ─── START / STOP ──────────────────────────
     def start(self):
         self._running = True
-        shift = self.shift_detector.current_shift()
+        code, label = shift_utils.detect_shift()
         logger.info(
-            f"Production Logger v3 (zamanlanmış özet)\n"
+            f"Production Logger v4 (shift_utils entegre)\n"
             f"  Log aralığı: {self.log_interval}sn\n"
-            f"  Vardiya: {shift['label']}\n"
-            f"  Özet saatleri: {', '.join(s['code'] + ' → ' + str(s['latest_end']) + ':00' for s in self.shift_detector.shifts)}"
+            f"  Vardiya: {label}\n"
+            f"  Özet saatleri: {', '.join(s['code'] + ' → ' + str(s['latest_end']) + ':00' for s in shift_utils.get_shifts())}"
         )
         self.client.connect(self.mqtt_host, self.mqtt_port, 60)
         self.client.loop_start()
@@ -661,18 +637,17 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 
-    shifts = [
-        {"code": "vardiya_1", "label": "1. Vardiya",
-         "start_hour": 8, "end_hour": 18, "earliest_end": 17, "latest_end": 19},
-        {"code": "vardiya_2", "label": "2. Vardiya",
-         "start_hour": 18, "end_hour": 24, "earliest_end": 23, "latest_end": 1},
-    ]
+    from line_utils import load_lines_config
+    lines = load_lines_config()
+    if not lines:
+        raise SystemExit("production_lines'ta aktif hat yok — servis başlatılmıyor")
+    logger.info(f"Hatlar: {[(l['line_id'], l['mqtt_prefix']) for l in lines]}")
 
     svc = ProductionLogger(
-        db_url=os.environ["DB_URL"],  
+        db_url=os.environ["DB_URL"],
         mqtt_host=os.getenv("MQTT_HOST", "127.0.0.1"),
         log_interval_sec=int(os.getenv("LOG_INTERVAL", "60")),
-        shifts_config=shifts,
+        lines_config=lines,
     )
 
     try:

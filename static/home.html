@@ -98,10 +98,8 @@
 <script>
 /* ═══════════ KONFİGÜRASYON — projene göre burayı düzenle ═══════════ */
 const API = window.location.origin;
-const LINES = [
-  { id: 1, name: 'Qs Hattı' },
-  { id: 2, name: 'Hat 2'   },
-];
+let LINES = null;
+
 const PROD_EP = id => `${API}/api/v1/production/current/${id}`;
 // production/current yanıtında malzeme bilgisi yoksa atama endpoint'ini aç:
 const ASSIGN_EP = null; // örn: id => `${API}/api/v1/assignments/active/${id}`
@@ -172,9 +170,22 @@ function render(states){
 }
 
 async function refresh(){
+  if (!LINES){
+    try {
+      LINES = (await fetchJson(`${API}/api/v1/lines`))
+              .map(l => ({ id: l.line_id, name: l.line_name }));
+    } catch(e){
+      errEl.style.display = 'block';
+      errEl.textContent = '/api/v1/lines yanıt vermiyor';
+      return;
+    }
+  }
   const states = await Promise.all(LINES.map(async l => {
     const out = { id: l.id, name: l.name, prod: null, assign: null };
-    try { out.prod = await fetchJson(PROD_EP(l.id)); } catch(e){ /* hat verisi yoksa boş göster */ }
+    try {
+      const p = await fetchJson(PROD_EP(l.id));
+      out.prod = ('line_id' in p) ? p : null;   // boş yanıt = veri yok say
+    } catch(e){ /* hat verisi yoksa boş göster */ }
     if (ASSIGN_EP){
       try { out.assign = await fetchJson(ASSIGN_EP(l.id)); } catch(e){}
     }

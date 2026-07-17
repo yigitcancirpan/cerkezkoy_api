@@ -82,7 +82,8 @@
   <div class="dot dot-green" id="cDot"></div>
   <span style="font-size:11px;color:var(--green);" id="cText">CYCLE</span>
 </div>
-    <span class="badge" style="background:var(--blue);color:white;" id="lineBadge">Qs Hattı</span>
+    <span class="badge" style="background:var(--blue);color:white;" id="lineBadge">—</span>
+    <span class="badge" style="background:var(--amber);color:#000;display:none;" id="noDataBadge">Henüz veri yok</span>
     <span class="badge" style="background:var(--card2);color:var(--dim);" id="shiftBadge">—</span>
     <span class="badge" style="background:var(--card2);color:var(--dim);" id="modelBadge">—</span>
     <a class="badge" href="/static/analytics.html" style="background:var(--purple);color:white;text-decoration:none;">📈 Geçmiş</a>
@@ -235,7 +236,32 @@
 
 <script>
 const API = window.location.origin;
-const LID = 1;
+const LID = parseInt(new URLSearchParams(location.search).get('line') || '1');
+(async () => {
+  try {
+    const r = await fetch(`${API}/api/v1/lines`);
+    if (r.ok) {
+      const line = (await r.json()).find(l => l.line_id === LID);
+      if (line) {
+        document.getElementById('lineBadge').textContent = line.line_name;
+        document.title = `${line.line_name} — Üretim Dashboard`;
+      }
+    }
+  } catch(e) { console.warn(e); }
+})();
+let hasProdData = false;
+function setNoDataIndicators(){
+  hasProdData = false;
+  const sDot=document.getElementById('sDot'), sText=document.getElementById('sText');
+  sDot.className='dot'; sDot.style.background='var(--dim)'; sDot.style.boxShadow='none';
+  sText.textContent='VERİ YOK'; sText.style.color='var(--dim)';
+  const cDot=document.getElementById('cDot'), cText=document.getElementById('cText');
+  cDot.className='dot'; cDot.style.background='var(--dim)'; cDot.style.boxShadow='none';
+  cText.textContent='—'; cText.style.color='var(--dim)';
+  document.getElementById('dtStatus').textContent='—';
+  document.getElementById('dtStatus').style.color='var(--dim)';
+  document.getElementById('dtSub').textContent='Veri bekleniyor';
+}
 let curProduced = 0;
 const scrapState = {total:0, by_reason:[]};
 function renderScrapQuality(){
@@ -336,7 +362,7 @@ function vardiyaExcel() {
   const s = document.getElementById('rapStart').value;
   const e = document.getElementById('rapEnd').value;
   if (!s || !e) { alert('Başlangıç ve bitiş tarihi seç'); return; }
-  window.location.href = `/api/v1/report/vardiya-excel?start=${s}&end=${e}&line_id=1`;
+  window.location.href = `/api/v1/report/vardiya-excel?start=${s}&end=${e}&line_id=${LID}`;
 }
 
 // Anlık
@@ -345,6 +371,10 @@ async function fetchCurrent(){
     const r=await fetch(`${API}/api/v1/production/current/${LID}`);
     if(!r.ok) return;
     const d=await r.json();
+    const noData = document.getElementById('noDataBadge');
+    if(!('line_id' in d)){ noData.style.display='inline-block'; setNoDataIndicators(); return; }
+    noData.style.display='none';
+    hasProdData = true;
     const cDot = document.getElementById('cDot');
     const cText = document.getElementById('cText');
     if (d.auto_cycle_on === true) {
@@ -440,6 +470,7 @@ async function fetchCurrent(){
 
 // Duruş
 async function fetchDt(){
+  if(!hasProdData) return;   // veri akmayan hatta duruş/üretim hükmü verme
   try{
     const r=await fetch(`${API}/api/v1/downtimes/active/${LID}`);
     if(!r.ok) return;

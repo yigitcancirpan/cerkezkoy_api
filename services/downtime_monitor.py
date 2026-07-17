@@ -116,6 +116,7 @@ class DowntimeMonitor:
     def _on_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
             logger.info("MQTT bağlantısı kuruldu")
+            client.subscribe("fabrika/config")
             for pfx in self.prefix_map:
                 client.subscribe(f"{pfx}/makine_durumu")   # ← YENİ ana sinyal (auto_cycle_on)
                 client.subscribe(f"{pfx}/komut")            # ← sadece EMPTY_LINE için
@@ -410,12 +411,18 @@ class DowntimeMonitor:
 if __name__ == "__main__":
     import os
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+    from line_utils import load_lines_config
+    lines = load_lines_config(os.environ["DB_URL"])
+    if not lines:
+        raise SystemExit("production_lines'ta aktif hat yok")
+
     m = DowntimeMonitor(
         api_base_url=os.getenv("API_URL", "http://127.0.0.1:8000"),
         mqtt_host=os.getenv("MQTT_HOST", "127.0.0.1"),
         grace_sec=int(os.getenv("GRACE_PERIOD", "30")),
         shift_end_min=float(os.getenv("SHIFT_END_TIMEOUT", "60")),
         stall_sec=int(os.getenv("STALL_TIMEOUT", "180")),
+        lines_config=lines,
     )
     try:
         m.start()

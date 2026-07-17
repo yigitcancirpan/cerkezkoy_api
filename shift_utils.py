@@ -66,7 +66,7 @@ def _refresh():
         cur = db.cursor(cursor_factory=RealDictCursor)
         cur.execute("""
             SELECT code, label, start_hour, end_hour, latest_end,
-                   window_hours, planned_seconds, display_order, is_active
+                   window_hours, planned_seconds, display_order, is_active, line_id
             FROM shift_config
             WHERE is_active = TRUE
             ORDER BY display_order, start_hour
@@ -107,9 +107,15 @@ def invalidate():
 
 
 # ── Dışa açık API ──
-def get_shifts(force=False):
+def get_shifts(force=False, line_id=None):
+    """line_id verilirse: o hatta özel satırlar; yoksa global (line_id IS NULL) satırlar."""
     _ensure(force)
-    return list(_state["shifts"])
+    allrows = _state["shifts"]
+    if line_id is not None:
+        specific = [s for s in allrows if s.get("line_id") == line_id]
+        if specific:
+            return specific
+    return [s for s in allrows if s.get("line_id") is None] or list(allrows)
 
 
 def get_excluded_codes(force=False):
@@ -126,33 +132,30 @@ def _in_window(h: int, start: int, end: int) -> bool:
     return h >= start or h < end      # gece yarısını geçen (22–06)
 
 
-def detect_shift(dt: datetime = None):
-    """(code, label) döner. Hiçbir pencere içermezse ilk aktif vardiyaya düşer
-    — tek-vardiya modunda her saat vardiya_1 olur."""
+def detect_shift(dt: datetime = None, line_id: int = None):
     dt = dt or datetime.now()
     h = dt.hour
-    shifts = get_shifts()
+    shifts = get_shifts(line_id=line_id)
     for s in shifts:
         if _in_window(h, s["start_hour"], s["end_hour"]):
             return s["code"], s["label"]
-    first = shifts[0]                # boşluk → ilk aktif vardiya (tek-vardiya: hep bu)
+    first = shifts[0]
     return first["code"], first["label"]
 
 
-def detect_shift_code(dt: datetime = None) -> str:
-    return detect_shift(dt)[0]
+def detect_shift_code(dt: datetime = None, line_id: int = None) -> str:
+    return detect_shift(dt, line_id)[0]
 
 
-def shift_by_code(code: str):
-    for s in get_shifts():
+def shift_by_code(code: str, line_id: int = None):
+    for s in get_shifts(line_id=line_id):
         if s["code"] == code:
             return s
-    return get_shifts()[0]
+    return get_shifts(line_id=line_id)[0]
 
 
-def planned_seconds(code: str) -> int:
-    """OEE payda TABANI (mola dinamik düşülecek)."""
-    return int(shift_by_code(code).get("planned_seconds") or _FALLBACK_SHIFT["planned_seconds"])
+def planned_seconds(code: str, line_id: int = None) -> int:
+    return int(shift_by_code(code, line_id).get("planned_seconds") or _FALLBACK_SHIFT["planned_seconds"])
 
 
 def resolve_shift_date(shift: dict, now: datetime):
