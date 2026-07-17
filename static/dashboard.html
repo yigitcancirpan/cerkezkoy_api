@@ -249,7 +249,7 @@ const LID = parseInt(new URLSearchParams(location.search).get('line') || '1');
     }
   } catch(e) { console.warn(e); }
 })();
-let hasProdData = false;
+let hasProdData = false, lastAutoCycle = null, lastCycleAge = null;
 function setNoDataIndicators(){
   hasProdData = false;
   const sDot=document.getElementById('sDot'), sText=document.getElementById('sText');
@@ -355,7 +355,14 @@ setInterval(()=>{
 
 function fmtTime(iso){
   if(!iso) return '—';
-  try{const d=new Date(iso);return d.toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'});}catch{return '—';}
+  try{
+    const d=new Date(iso);
+    const t=d.toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'});
+    const today=new Date();
+    if(d.toDateString()!==today.toDateString())
+      return d.toLocaleDateString('tr-TR',{day:'2-digit',month:'2-digit'})+' '+t;
+    return t;
+  }catch{return '—';}
 }
 
 function vardiyaExcel() {
@@ -375,6 +382,8 @@ async function fetchCurrent(){
     if(!('line_id' in d)){ noData.style.display='inline-block'; setNoDataIndicators(); return; }
     noData.style.display='none';
     hasProdData = true;
+    lastAutoCycle = d.auto_cycle_on;          // fetchDt bunu kullanacak
+    lastCycleAge = d.last_cycle_at ? (Date.now()-new Date(d.last_cycle_at).getTime())/1000 : null;
     const cDot = document.getElementById('cDot');
     const cText = document.getElementById('cText');
     if (d.auto_cycle_on === true) {
@@ -483,12 +492,20 @@ async function fetchDt(){
       document.getElementById('dtStatus').style.color='var(--red)';
       document.getElementById('dtSub').textContent=`${d.elapsed_text||'—'} süredir`;
     }else{
-      document.getElementById('sDot').className='dot dot-green';
-      document.getElementById('sText').textContent='ÜRETİMDE';
-      document.getElementById('sText').style.color='var(--green)';
-      document.getElementById('dtStatus').textContent='Çalışıyor';
-      document.getElementById('dtStatus').style.color='var(--cyan)';
-      document.getElementById('dtSub').textContent='Aktif duruş yok';
+      const sDot=document.getElementById('sDot'), sText=document.getElementById('sText');
+      const dtS=document.getElementById('dtStatus'), dtSub=document.getElementById('dtSub');
+      if(lastAutoCycle===false){
+        // PLC "cycle kapalı" diyor, duruş kaydı da yok → boşta
+        sDot.className='dot'; sDot.style.background='var(--amber)'; sDot.style.boxShadow='none';
+        sText.textContent='BEKLEMEDE'; sText.style.color='var(--amber)';
+        dtS.textContent='Makine çalışmıyor'; dtS.style.color='var(--amber)';
+        dtSub.textContent=lastCycleAge!=null?`Son baskı: ${fmtTime(new Date(Date.now()-lastCycleAge*1000).toISOString())}`:'Duruş kaydı yok';
+      }else{
+        sDot.className='dot dot-green'; sDot.style.background=''; sDot.style.boxShadow='';
+        sText.textContent='ÜRETİMDE'; sText.style.color='var(--green)';
+        dtS.textContent='Çalışıyor'; dtS.style.color='var(--cyan)';
+        dtSub.textContent='Aktif duruş yok';
+      }
     }
   }catch(e){}
 }
