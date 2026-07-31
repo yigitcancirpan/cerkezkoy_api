@@ -40,25 +40,27 @@ from sqlalchemy.exc import IntegrityError
 from models.database import get_db
 
 router = APIRouter(prefix="/api/v1/assignments", tags=["Pres Atama"])
-
+import logging
+logger = logging.getLogger("assignments")
 
 # ─── MQTT bildirim (settings.py'deki _publish_config_reload paterni) ───
-def _publish_assignment_change(machine_id: int, material: Optional[dict]):
-    """Atama değişti → terminal + plc_publisher anlık haberdar olsun."""
+def _publish_assignment_change(machine_id: int, material: Optional[dict], line_id: int = 1):
+    """Atama değişti → terminal + ilgili hattın publisher'ı anlık haberdar olsun."""
+    prefix = "fabrika/hat2" if line_id == 2 else "fabrika/hat1"
+    payload = {
+        "machine_id": machine_id,
+        "material": material,                       # geriye uyumlu (terminal + hat1)
+        "target":     (material or {}).get("target", 0),      # pulse_publisher ÜST seviye okur
+        "lot_number": (material or {}).get("lot_number", 0),
+        "model_id":   (material or {}).get("model_id", 0),
+        "ts": time.time(),
+    }
     try:
         import paho.mqtt.publish as publish
-        publish.single(
-            "fabrika/hat1/atama",
-            payload=json.dumps({
-                "machine_id": machine_id,
-                "material": material,          # None = pres boşa çıktı
-                "ts": time.time(),
-            }),
-            hostname="127.0.0.1", port=1883,
-            retain=True,                        # yeni bağlanan client son durumu görsün
-        )
-    except Exception:
-        pass  # MQTT yoksa sessiz geç — dashboard polling zaten 5sn'de yakalar
+        publish.single(f"{prefix}/atama", payload=json.dumps(payload),
+                       hostname="127.0.0.1", port=1883, retain=True)
+    except Exception as e:
+        logger.warning(f"atama MQTT yayını başarısız (DB yazıldı, polling yakalar): {e}")
 
 
 def _now_utc() -> datetime:
@@ -116,7 +118,7 @@ def get_board(line_id: int = Query(1), db: Session = Depends(get_db)):
         LEFT JOIN press_assignments a
                ON a.machine_id = m.machine_id AND a.is_active = TRUE
         LEFT JOIN materials mat ON mat.material_id = a.material_id
-        WHERE m.line_id = :lid AND m.machine_type = 'hydraulic_press'
+        WHERE m.line_id = :lid AND m.machine_type IN ('hydraulic_press','mechanical_press')
         ORDER BY m.machine_id
     """), {"lid": line_id}).fetchall()
 
@@ -232,7 +234,7 @@ def assign_material(req: AssignRequest, db: Session = Depends(get_db)):
     # Pres kontrolü
     machine = db.execute(text("""
         SELECT machine_id, machine_name, line_id FROM machines
-        WHERE machine_id = :mid AND machine_type = 'hydraulic_press'
+        WHERE machine_id = :mid AND machine_type IN ('hydraulic_press','mechanical_press')
     """), {"mid": req.machine_id}).fetchone()
     if not machine:
         raise HTTPException(404, f"Pres bulunamadı: machine_id={req.machine_id}")
@@ -289,7 +291,7 @@ def assign_material(req: AssignRequest, db: Session = Depends(get_db)):
         "ideal_cycle_ds": material.ideal_cycle_ds,
         "target": target,
         "lot_number": req.lot_number,
-    })
+    }, line_id=machine.line_id)          # ← eklendi
 
     return {
         "assignment_id": row[0],
@@ -312,7 +314,7 @@ def end_assignment(assignment_id: int, req: EndRequest = EndRequest(),
         SET is_active = FALSE, ended_at = :now,
             notes = COALESCE(notes, '') || :extra
         WHERE assignment_id = :aid AND is_active = TRUE
-        RETURNING machine_id
+        RETURNING machine_id, line_id
     """), {"aid": assignment_id, "now": now,
            "extra": f" [Kapanış] {req.notes}" if req.notes else " [manuel bitirildi]"
            }).fetchone()
@@ -320,7 +322,7 @@ def end_assignment(assignment_id: int, req: EndRequest = EndRequest(),
     if not row:
         raise HTTPException(404, "Aktif atama bulunamadı")
 
-    _publish_assignment_change(row[0], None)   # None = pres boş
+    _publish_assignment_change(row[0], None, line_id=row[1])   # ← line_id eklendi
     return {"assignment_id": assignment_id, "machine_id": row[0],
             "message": "Atama bitirildi — pres boşta"}
 

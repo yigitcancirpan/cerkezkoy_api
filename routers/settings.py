@@ -111,9 +111,9 @@ def upsert_shift(code: str, body: ShiftUpsert, db: Session = Depends(get_db)):
     db.execute(text("""
         INSERT INTO shift_config
             (code, label, start_hour, end_hour, latest_end,
-             window_hours, planned_seconds, display_order, is_active, updated_at)
-        VALUES (:code,:label,:sh,:eh,:le,:wh,:ps,:ord,:act,NOW())
-        ON CONFLICT (code) DO UPDATE SET
+             window_hours, planned_seconds, display_order, is_active, line_id, updated_at)
+        VALUES (:code,:label,:sh,:eh,:le,:wh,:ps,:ord,:act,:lid,NOW())
+        ON CONFLICT (code, COALESCE(line_id, -1)) DO UPDATE SET
             label=EXCLUDED.label, start_hour=EXCLUDED.start_hour,
             end_hour=EXCLUDED.end_hour, latest_end=EXCLUDED.latest_end,
             window_hours=EXCLUDED.window_hours, planned_seconds=EXCLUDED.planned_seconds,
@@ -121,9 +121,10 @@ def upsert_shift(code: str, body: ShiftUpsert, db: Session = Depends(get_db)):
             updated_at=NOW()
     """), {"code": body.code, "label": body.label, "sh": body.start_hour,
            "eh": body.end_hour, "le": body.latest_end, "wh": body.window_hours,
-           "ps": body.planned_seconds, "ord": body.display_order, "act": body.is_active})
+           "ps": body.planned_seconds, "ord": body.display_order, "act": body.is_active,
+           "lid": None})          # ← global vardiya: line_id = NULL
     db.commit()
-    _publish_config_reload()        # ← anlık uygulama (MQTT)
+    _publish_config_reload()
     return {"code": code, "message": "Vardiya kaydedildi"}
 
 

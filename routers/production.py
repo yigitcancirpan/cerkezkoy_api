@@ -66,7 +66,17 @@ def get_current(line_id: int, db: Session = Depends(get_db)):
         return {"produced": 0, "target": 0}
 
     result = dict(row._mapping)
-
+    # Vardiya üretimi (restart-proof, /summary/now ile aynı kaynak)
+    sc = result.get("current_shift")
+    if sc:
+        pr = db.execute(text("""
+            SELECT COALESCE(MAX(produced) - MIN(produced), 0)
+            FROM production_log
+            WHERE line_id = :lid AND logged_at::date = CURRENT_DATE AND shift = :shift
+        """), {"lid": line_id, "shift": sc}).fetchone()
+        result["produced_shift"] = int(pr[0]) if pr else 0
+    else:
+        result["produced_shift"] = result.get("produced", 0)
     # ── İLK BASKI: snapshot DEĞİL, production_log'dan türet (restart-proof) ──
     # production_log append-only ve kalıcı; restart öncesi kayıtlar tabloda kalır,
     # bu yüzden MIN(logged_at) restart'tan etkilenmez. Vardiya özeti de aynı kaynağı
@@ -120,7 +130,13 @@ def calculate_summary_now(
         return {"error": "Üretim verisi yok"}
 
     c = dict(current._mapping)
-    produced = c.get("produced") or 0
+    # Vardiya üretimi = production_log'dan MAX−MIN (restart-proof, yazılı özetle aynı)
+    prod_row = db.execute(text("""
+        SELECT COALESCE(MAX(produced) - MIN(produced), 0) AS shift_produced
+        FROM production_log
+        WHERE line_id = :lid AND logged_at::date = :d AND shift = :shift
+    """), {"lid": line_id, "d": today, "shift": shift_code}).fetchone()
+    produced = int(prod_row[0]) if prod_row else 0
     target = c.get("target") or 0
     avg_cycle = c.get("average_cycle") or 0
 

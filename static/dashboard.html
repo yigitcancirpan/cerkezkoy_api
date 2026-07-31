@@ -87,6 +87,7 @@
     <span class="badge" style="background:var(--card2);color:var(--dim);" id="shiftBadge">—</span>
     <span class="badge" style="background:var(--card2);color:var(--dim);" id="modelBadge">—</span>
     <a class="badge" href="/static/analytics.html" style="background:var(--purple);color:white;text-decoration:none;">📈 Geçmiş</a>
+    <a class="badge" id="setupLink" href="/static/setup.html" style="background:var(--cyan);color:#04121a;text-decoration:none;">⚙ Kurulum</a>
     <span class="clock" id="clock">--:--:--</span>
   </div>
 </div>
@@ -238,6 +239,8 @@
 const API = window.location.origin;
 const LID = parseInt(new URLSearchParams(location.search).get('line') || '1');
 (async () => {
+  document.getElementById('setupLink').href = `/static/setup.html?line=${LID}`;   // ← eklendi
+
   try {
     const r = await fetch(`${API}/api/v1/lines`);
     if (r.ok) {
@@ -405,11 +408,12 @@ async function fetchCurrent(){
         cText.textContent = '...';
         cText.style.color = 'var(--dim)';
     }
-    document.getElementById('produced').textContent=d.produced||0;
-    curProduced = d.produced||0;
+    const shiftProduced = (d.produced_shift != null) ? d.produced_shift : (d.produced||0);
+    document.getElementById('produced').textContent=shiftProduced;
+    curProduced = shiftProduced;
     renderScrapQuality();   // Fire + Kalite artık scrap_entries'ten (PLC değil)
 
-    const t=d.target||0, p=d.produced||0;
+    const t=d.target||0, p=shiftProduced;      // ← d.produced değil, shiftProduced
     const pct=t>0?(p/t*100).toFixed(1):0;
 
     document.getElementById('targetSub').textContent=`Hedef: ${t}`;

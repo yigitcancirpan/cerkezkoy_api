@@ -99,8 +99,8 @@
 <div class="top">
   <h1>⚙ Hat <span>Kurulumu</span></h1>
   <div class="top-right">
-    <span class="badge" style="background:var(--blue);color:#fff;">Qs Hattı</span>
-    <a class="badge" href="/static/dashboard.html" style="background:var(--purple);color:#fff;text-decoration:none;">📊 Dashboard</a>
+    <span class="badge" id="lineBadge" style="background:var(--blue);color:#fff;">—</span>
+    <a class="badge" id="dashLink" href="/static/dashboard.html" style="background:var(--purple);color:#fff;text-decoration:none;">📊 Dashboard</a>
     <span class="clock" id="clock">--:--:--</span>
   </div>
 </div>
@@ -149,8 +149,20 @@
 
 <script>
 const API = '';           // aynı origin — dashboard.html ile aynı kullanım
-const LID = 1;
-
+const LID = parseInt(new URLSearchParams(location.search).get('line') || '1');
+(async () => {
+  document.getElementById('dashLink').href = `/static/dashboard.html?line=${LID}`;
+  try {
+    const r = await fetch(`${API}/api/v1/lines`);
+    if (r.ok) {
+      const line = (await r.json()).find(l => l.line_id === LID);
+      if (line) {
+        document.getElementById('lineBadge').textContent = line.line_name;
+        document.title = `${line.line_name} — Hat Kurulumu`;
+      }
+    }
+  } catch(e){ console.warn(e); }
+})();
 let board = { presses: [], materials: [] };
 let modalMachineId = null;
 let selectedMaterialId = null;
