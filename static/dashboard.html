@@ -195,6 +195,7 @@
   <label>Başlangıç <input type="date" id="rapStart"></label>
   <label>Bitiş <input type="date" id="rapEnd"></label>
   <button onclick="vardiyaExcel()">Excel İndir</button>
+  <button onclick="vardiyaExcelAll()">Tüm Hatlar (ZIP)</button>
 </div>
     <table>
       <thead><tr><th>Tarih</th><th>Vardiya</th><th>Üretim</th><th>Fire</th><th>Duruş</th><th>Mola</th><th>OEE</th></tr></thead>
@@ -480,7 +481,12 @@ async function fetchCurrent(){
     document.getElementById('lastUp').textContent=new Date().toLocaleTimeString('tr-TR');
   }catch(e){console.warn(e);}
 }
-
+function vardiyaExcelAll() {
+  const s = document.getElementById('rapStart').value;
+  const e = document.getElementById('rapEnd').value;
+  if (!s || !e) { alert('Başlangıç ve bitiş tarihi seç'); return; }
+  window.location.href = `/api/v1/report/vardiya-excel-all?start=${s}&end=${e}`;
+}
 // Duruş
 async function fetchDt(){
   if(!hasProdData) return;   // veri akmayan hatta duruş/üretim hükmü verme

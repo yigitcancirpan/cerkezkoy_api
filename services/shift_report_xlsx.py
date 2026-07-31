@@ -95,7 +95,7 @@ def _cell(ref, style, value):
     return f'<c r="{ref}" s="{style}" t="inlineStr"><is><t xml:space="preserve">{escape(str(value))}</t></is></c>'
 
 
-def build_report(rows: list) -> bytes:
+def build_report(rows: list, line_name: str = "Qs Hattı") -> bytes:
     max_dt = max((len(r["downtimes"]) for r in rows), default=1) or 1
     ncols = len(BASE_HEADERS) + max_dt * 2 + 1
     last_col = _colref(ncols)
@@ -112,7 +112,7 @@ def build_report(rows: list) -> bytes:
     sheet_rows = []
 
     # satır 1: başlık
-    sheet_rows.append(f'<row r="1" ht="22" customHeight="1">{_cell("A1", 1, "Qs HATTI — GÜNLÜK VARDİYA RAPORU")}</row>')
+    sheet_rows.append(f'<row r="1" ht="22" customHeight="1">{_cell("A1", 1, f"{line_name.upper()} — GÜNLÜK VARDİYA RAPORU")}</row>')
 
     # satır 3: header
     HR = 3
