@@ -86,8 +86,9 @@
     <span class="badge" style="background:var(--amber);color:#000;display:none;" id="noDataBadge">Henüz veri yok</span>
     <span class="badge" style="background:var(--card2);color:var(--dim);" id="shiftBadge">—</span>
     <span class="badge" style="background:var(--card2);color:var(--dim);" id="modelBadge">—</span>
-    <a class="badge" href="/static/analytics.html" style="background:var(--purple);color:white;text-decoration:none;">📈 Geçmiş</a>
-    <a class="badge" id="setupLink" href="/static/setup.html" style="background:var(--cyan);color:#04121a;text-decoration:none;">⚙ Kurulum</a>
+    <a class="badge" id="analyticsLink" href="/static/analytics.html" style="background:var(--purple);color:white;text-decoration:none;">📈 Geçmiş</a>    <a class="badge" id="setupLink" href="/static/setup.html" style="background:var(--red);color:#04121a;text-decoration:none;">⚙ Kurulum</a>
+    <a class="badge" id="adminLink" href="/static/admin.html" style="background:var(--cyan);color:#04121a;text-decoration:none;">🛃 Yönetim</a>
+    <a class="badge" id="downtimeLink" href="/static/downtime_monitor.html" style="background:var(--amber);color:#04121a;text-decoration:none;">✋🏼 Duruş Takip</a>
     <span class="clock" id="clock">--:--:--</span>
   </div>
 </div>
@@ -219,7 +220,7 @@
   <div id="scrapList" style="margin-top:12px;display:flex;flex-direction:column;gap:4px;max-height:180px;overflow:auto;"></div>
 </div>
 <!-- ═══ YAĞ TAKİBİ ═══ -->
-<div class="card" style="margin-top:14px;">
+<div class="card" id="oilCard" style="margin-top:14px;display:none;">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
     <div class="card-label" style="margin:0;">🛢 Pres Yağ Durumu</div>
     <span style="font-size:10px;color:var(--dim);" id="oilUpdate">—</span>
@@ -241,6 +242,36 @@ const API = window.location.origin;
 const LID = parseInt(new URLSearchParams(location.search).get('line') || '1');
 (async () => {
   document.getElementById('setupLink').href = `/static/setup.html?line=${LID}`;   // ← eklendi
+
+  try {
+    const r = await fetch(`${API}/api/v1/lines`);
+    if (r.ok) {
+      const line = (await r.json()).find(l => l.line_id === LID);
+      if (line) {
+        document.getElementById('lineBadge').textContent = line.line_name;
+        document.title = `${line.line_name} — Üretim Dashboard`;
+      }
+    }
+  } catch(e) { console.warn(e); }
+})();
+(async () => {
+  document.getElementById('adminLink').href = `/static/admin.html?line=${LID}`;   // ← eklendi
+
+  try {
+    const r = await fetch(`${API}/api/v1/lines`);
+    if (r.ok) {
+      const line = (await r.json()).find(l => l.line_id === LID);
+      if (line) {
+        document.getElementById('lineBadge').textContent = line.line_name;
+        document.title = `${line.line_name} — Üretim Dashboard`;
+      }
+    }
+  } catch(e) { console.warn(e); }
+})();
+document.getElementById('analyticsLink').href = `/static/analytics.html?line=${LID}`;
+
+(async () => {
+  document.getElementById('downtimeLink').href = `/static/downtime_monitor.html?line=${LID}`;   // ← eklendi
 
   try {
     const r = await fetch(`${API}/api/v1/lines`);
@@ -275,13 +306,44 @@ function renderScrapQuality(){
   const q = curProduced > 0 ? (good/curProduced*100).toFixed(1) : '100';
   const qs = document.getElementById('qualitySub'); if(qs) qs.textContent = `Kalite: %${q}`;
 }
-function currentShiftCode(){const h=new Date().getHours();if(h>=8&&h<19)return 'vardiya_1';if(h>=19||h<3)return 'vardiya_2';return 'vardiya_1';}
-async function fetchOil(){
+// ── Vardiya tanımı tek kaynaktan (shift_config) — 60sn cache ──
+let SHIFTS = null, shiftsTs = 0;
+async function loadShifts(){
+  if(SHIFTS && Date.now()-shiftsTs < 60000) return SHIFTS;
+  try{
+    const r = await fetch(`${API}/api/v1/settings/shifts`);
+    if(r.ok){ SHIFTS = await r.json(); shiftsTs = Date.now(); }
+  }catch(e){}
+  return SHIFTS;
+}
+function pickShift(){
+  const h = new Date().getHours();
+  if(SHIFTS && SHIFTS.length){
+    for(const s of SHIFTS){
+      if(s.is_active === false) continue;
+      const sh = s.start_hour, eh = s.end_hour % 24;
+      const inside = sh < eh ? (h >= sh && h < eh) : (h >= sh || h < eh);
+      if(inside) return s;
+    }
+    return SHIFTS[0];          // boşluk → ilk vardiya (tek-vardiya modunda hep bu)
+  }
+  return {code:'vardiya_1', label:'1. Vardiya'};   // API yoksa güvenli varsayılan
+}
+function currentShiftCode(){ return pickShift().code; }
+loadShifts();
+setInterval(loadShifts, 60000);async function fetchOil(){
   try {
-    const r = await fetch(`${API}/api/v1/oil/current`);
+    const r = await fetch(`${API}/api/v1/oil/current?line_id=${LID}`);
     if(!r.ok) return;
     const d = await r.json();
-    
+
+    // Bu hatta pres yoksa kartı hiç gösterme
+    if(!d.presses || !d.presses.length){
+      document.getElementById('oilCard').style.display='none';
+      return;
+    }
+    document.getElementById('oilCard').style.display='';
+
     const grid = document.getElementById('oilGrid');
     const TAGS = {
       1: {level: '88-470BL1', temp: '88-470BT1'},
@@ -347,14 +409,12 @@ async function fetchOil(){
 }
 
 fetchOil();
-setInterval(fetchOil, 30000);  // 30 saniyede bir
+setInterval(fetchOil, 30000);
 // Saat
 setInterval(()=>{
   const n=new Date();
   document.getElementById('clock').textContent=n.toLocaleTimeString('tr-TR');
-  const h=n.getHours();
-  let s; if(h>=8&&h<19) s='1. Vardiya'; else if(h>=19||h<3) s='2. Vardiya'; else s='—';
-  document.getElementById('shiftBadge').textContent=s;
+  document.getElementById('shiftBadge').textContent = pickShift().label || '—';
 },1000);
 
 function fmtTime(iso){

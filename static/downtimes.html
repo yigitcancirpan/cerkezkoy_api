@@ -485,13 +485,23 @@ async function fetchQuality(){
   // Üretim + fire: URL'den geldiyse onu kullan, yoksa vardiya özetinden çek
   let produced = urlProduced!=null ? +urlProduced : 0;
   let scrapTotal = urlScrap!=null ? +urlScrap : 0;
-  if(urlProduced==null){
+
+  // URL'den gelmediyse VEYA 0 geldiyse → vardiya özetinden dene
+  if(!produced){
     try{
       const daysBack=Math.ceil((new Date(todayLocal())-new Date(urlDate))/86400000)+2;
       const r=await fetch(`${API}/api/v1/production/shifts?line_id=${lineId}&days=${Math.max(daysBack,2)}`);
       if(r.ok){const arr=await r.json();
         arr.forEach(s=>{ if(s.shift_date===urlDate && (!urlShift||s.shift===urlShift)){ produced+=s.total_produced||0; scrapTotal+=s.total_scrap||0; } });
       }
+    }catch(e){}
+  }
+
+  // Hâlâ 0 ve BUGÜNE bakıyorsak → özet henüz yazılmamış, canlı hesaptan al
+  if(!produced && urlDate===todayLocal()){
+    try{
+      const r=await fetch(`${API}/api/v1/production/summary/now?line_id=${lineId}`,{method:'POST'});
+      if(r.ok){ const s=await r.json(); produced = s.produced||0; scrapTotal = s.scrap||scrapTotal; }
     }catch(e){}
   }
 
@@ -509,7 +519,7 @@ async function fetchQuality(){
   document.getElementById('qScrap').textContent = scrapQty || 0;
   document.getElementById('qRate').textContent = produced>0 ? `%${(scrapQty/produced*100).toFixed(2)}` : '—';
   document.getElementById('qTop').textContent = reasons.length ? reasons[0].reason_name : '—';
-
+  
   const tb=document.getElementById('qScrapTable');
   if(!reasons.length){tb.innerHTML='<tr><td colspan="3" class="empty">Bu gün fire kaydı yok</td></tr>';}
   else{

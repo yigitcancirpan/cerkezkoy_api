@@ -495,6 +495,12 @@ const oilDateInput=document.getElementById('oilDate');
 oilDateInput.value=oilDate;
 oilDateInput.addEventListener('change',()=>{oilDate=oilDateInput.value;loadOilTemp();});
 
+// Yağ sekmesi yalnızca Hat 1 — press_oil verisi o hattın presleri
+if (LID !== 1) {
+  const oilTab = document.querySelector('.tab[data-tab="oil"]');
+  if (oilTab) oilTab.style.display = 'none';
+}
+
 loadProduction();
 </script>
 </body>

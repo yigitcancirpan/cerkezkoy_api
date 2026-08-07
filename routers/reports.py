@@ -20,12 +20,17 @@ from models.database import get_db
 from services.shift_report_xlsx import build_report
 import zipfile
 from io import BytesIO
-
+from zoneinfo import ZoneInfo
+TZ = ZoneInfo("Europe/Istanbul")
 router = APIRouter(prefix="/api/v1/report", tags=["Rapor"])
 
 
 def _hhmm(ts):
-    return ts.strftime("%H:%M") if ts else ""
+    if not ts:
+        return ""
+    if ts.tzinfo is None:                     # naive gelirse UTC varsay
+        ts = ts.replace(tzinfo=ZoneInfo("UTC"))
+    return ts.astimezone(TZ).strftime("%H:%M")
 
 def _line_name(db, line_id: int) -> str:
     row = db.execute(text(

@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from typing import Optional
 
 from models.database import get_db
@@ -96,3 +98,49 @@ def create_sensor(machine_id: int, sensor: SensorCreate,
     db.commit()
     db.refresh(db_sensor)
     return db_sensor
+
+class MachineUpdate(BaseModel):
+    machine_name: Optional[str] = None
+    machine_type: Optional[str] = None
+    manufacturer: Optional[str] = None
+    model: Optional[str] = None
+    serial_number: Optional[str] = None
+    line_id: Optional[int] = None
+    status: Optional[str] = None
+
+
+@router.patch("/{machine_id}")
+def update_machine(machine_id: int, req: MachineUpdate, db: Session = Depends(get_db)):
+    """Makine bilgilerini güncelle (ad, tip, hat, durum)."""
+    machine = db.query(Machine).filter(Machine.machine_id == machine_id).first()
+    if not machine:
+        raise HTTPException(404, "Makine bulunamadı")
+    if req.line_id is not None:
+        line = db.query(ProductionLine).filter(ProductionLine.line_id == req.line_id).first()
+        if not line:
+            raise HTTPException(404, "Üretim hattı bulunamadı")
+    for f in ("machine_name", "machine_type", "manufacturer", "model",
+              "serial_number", "line_id", "status"):
+        v = getattr(req, f)
+        if v is not None:
+            setattr(machine, f, v)
+    db.commit()
+    return {"machine_id": machine_id, "message": "Güncellendi"}
+
+
+@router.delete("/{machine_id}")
+def deactivate_machine(machine_id: int, db: Session = Depends(get_db)):
+    """Makineyi hattan çıkar — SİLMEZ, pasifleştirir.
+    (downtimes / press_assignments / sensors FK'ları geçmişi korur.)"""
+    machine = db.query(Machine).filter(Machine.machine_id == machine_id).first()
+    if not machine:
+        raise HTTPException(404, "Makine bulunamadı")
+    active = db.execute(text("""
+        SELECT assignment_id FROM press_assignments
+        WHERE machine_id = :mid AND is_active = TRUE LIMIT 1
+    """), {"mid": machine_id}).fetchone()
+    if active:
+        raise HTTPException(409, "Bu preste aktif malzeme ataması var — önce atamayı bitirin")
+    machine.status = "inactive"
+    db.commit()
+    return {"machine_id": machine_id, "message": "Pres pasifleştirildi"}

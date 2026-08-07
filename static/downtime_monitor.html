@@ -124,7 +124,7 @@
     <div class="status"><div class="dot dot-green" id="sDot"></div><span style="font-size:11px;color:var(--green);" id="sText">ÜRETİMDE</span></div>
     <span class="badge" style="background:var(--blue);color:white;" id="lineBadge">Qs Hattı</span>
     <span class="badge" style="background:var(--card2);color:var(--dim);" id="shiftBadge">—</span>
-    <a class="badge" href="/static/dashboard.html" style="background:var(--purple);color:white;text-decoration:none;">📊 Dashboard</a>
+    <a class="badge" id="dashLink" href="/static/dashboard.html" style="background:var(--purple);color:white;text-decoration:none;">📊 Dashboard</a>
     <span class="clock" id="clock">--:--:--</span>
     <button class="icon-btn" onclick="toggleConfig()" title="Ayarlar">⚙</button>
   </div>
@@ -204,7 +204,7 @@
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
       <div class="card-label" style="margin:0;">⏱ Bugünkü Duruşlar</div>
-      <a class="badge" href="/static/downtimes.html" target="_blank" style="background:var(--purple);color:white;text-decoration:none;">📈 Detaylı Analiz</a>
+      <a class="badge" id="downtimesLink" href="/static/downtimes.html" target="_blank" style="background:var(--purple);color:white;text-decoration:none;">📈 Detaylı Analiz</a>
     </div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;">
       <div style="background:var(--card2);border-radius:8px;padding:10px;text-align:center;">
@@ -271,10 +271,46 @@ function toggleConfig(){
   document.getElementById('configOverlay').classList.toggle('show');
 }
 let CONFIG = getConfig();
+// URL'de ?line=N varsa localStorage'ı geçersiz kıl (dashboard'dan hat bağlamıyla gelince)
+const urlLine = parseInt(new URLSearchParams(location.search).get('line'));
+if (urlLine) CONFIG.lineId = urlLine;
 document.getElementById('lineBadge').textContent = CONFIG.lineName;
+const LID = parseInt(new URLSearchParams(location.search).get('line') || '1');
+(async () => {
+  document.getElementById('dashLink').href = `/static/dashboard.html?line=${LID}`;
+  try {
+    const r = await fetch(`${CONFIG.apiUrl}/api/v1/lines`);
+    if (r.ok) {
+      const line = (await r.json()).find(l => l.line_id === LID);
+      if (line) {
+        document.getElementById('lineBadge').textContent = line.line_name;
+        document.title = `${line.line_name} — Hat Kurulumu`;
+      }
+    }
+  } catch(e){ console.warn(e); }
+})();
+(function(){
+  const ds = new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
+  const sh = (function(){ const h=new Date().getHours(); return h>=8&&h<18?'vardiya_1':(h>=18?'vardiya_2':'vardiya_3'); })();
+  document.getElementById('downtimesLink').href =
+    `/static/downtimes.html?date=${ds}&shift=${sh}&line_id=${CONFIG.lineId}`;
+})();
+// Hat adını API'den doğru getir (URL ile geldiyse kayıtlı ad yanlış olabilir)
+(async () => {
+  try {
+    const r = await fetch(`${CONFIG.apiUrl}/api/v1/lines`);
+    if (r.ok) {
+      const line = (await r.json()).find(l => l.line_id === CONFIG.lineId);
+      if (line) {
+        CONFIG.lineName = line.line_name;
+        document.getElementById('lineBadge').textContent = line.line_name;
+      }
+    }
+  } catch(e) { console.warn(e); }
+})();
 
 // ─── CONSTANTS ───
-const HIDDEN_CODES = ['BELIRLENMEDI','VARDIYA_SONU'];
+const HIDDEN_CODES = ['BELIRLENMEDI','VARDIYA_SONU','VARDIYA_BASI'];
 const BREAK_CODES  = ['MOLA_YEMEK','MOLA_CAY','MOLA_NAMAZ'];
 const ICONS = {'alert-triangle':'⚠️','repeat':'🔄','package':'📦','tool':'🔧','check-circle':'✅','settings':'⚙️','zap-off':'⚡','coffee':'☕','help-circle':'❓','wrench':'🔧','alert-circle':'🔴','log-out':'🏁'};
 
@@ -300,8 +336,27 @@ async function api(path, options={}){
 function showToast(msg,type='success'){ const t=document.getElementById('toast'); t.textContent=msg; t.className=`toast ${type} show`; setTimeout(()=>t.classList.remove('show'),3000); }
 
 // ─── SHIFT / CLOCK (detect_shift() ile birebir) ───
-function detectShift(){ const h=new Date().getHours(); if(h>=8&&h<18)return{name:'vardiya_1',label:'1. Vardiya'}; if(h>=18&&h<24)return{name:'vardiya_2',label:'2. Vardiya'}; return{name:'vardiya_3',label:'3. Vardiya'}; }
-function updateClock(){ document.getElementById('clock').textContent=new Date().toLocaleTimeString('tr-TR'); document.getElementById('shiftBadge').textContent=detectShift().label; }
+let SHIFTS=null, shiftsTs=0;
+async function loadShifts(){
+  if(SHIFTS && Date.now()-shiftsTs<60000) return SHIFTS;
+  try{ const r=await fetch(`${CONFIG.apiUrl}/api/v1/settings/shifts`); if(r.ok){ SHIFTS=await r.json(); shiftsTs=Date.now(); } }catch(e){}
+  return SHIFTS;
+}
+function detectShift(){
+  const h=new Date().getHours();
+  if(SHIFTS && SHIFTS.length){
+    for(const s of SHIFTS){
+      if(s.is_active===false) continue;
+      const sh=s.start_hour, eh=s.end_hour%24;
+      const inside = sh<eh ? (h>=sh&&h<eh) : (h>=sh||h<eh);
+      if(inside) return {name:s.code, label:s.label};
+    }
+    return {name:SHIFTS[0].code, label:SHIFTS[0].label};
+  }
+  return {name:'vardiya_1', label:'1. Vardiya'};
+}
+loadShifts();
+setInterval(loadShifts,60000);function updateClock(){ document.getElementById('clock').textContent=new Date().toLocaleTimeString('tr-TR'); document.getElementById('shiftBadge').textContent=detectShift().label; }
 setInterval(updateClock,1000); updateClock();
 
 // ─── REASON BUTTON ───
@@ -456,11 +511,13 @@ async function loadHistory(){
 async function fetchProduction(){
   try{
     const d=await api(`/api/v1/production/current/${CONFIG.lineId}`); if(!d)return;
-    curProduced=d.produced||0;
-    document.getElementById('prodVal').textContent=(d.produced!=null)?d.produced:'—';
+    // Vardiya bazlı üretim (dashboard ile aynı kaynak) — ham kümülatif değil
+    const shiftProduced=(d.produced_shift!=null)?d.produced_shift:(d.produced||0);
+    curProduced=shiftProduced;
+    document.getElementById('prodVal').textContent=(shiftProduced!=null)?shiftProduced:'—';
     const t=d.target||0;
     document.getElementById('targetSub').textContent=`Hedef: ${t||'—'}`;
-    document.getElementById('pFill').style.width=`${t>0?Math.min(d.produced/t*100,100):0}%`;
+    document.getElementById('pFill').style.width=`${t>0?Math.min(shiftProduced/t*100,100):0}%`;
     const act=d.actual_cycle||0, avg=d.average_cycle||0;
     document.getElementById('cycleVal').textContent=act>0?`${(act/10).toFixed(1)}s`:(avg>0?`${(avg/10).toFixed(1)}s`:'—');
     document.getElementById('cycleSub').textContent=avg>0?`Ort: ${(avg/10).toFixed(1)}s`:'Ort: —';

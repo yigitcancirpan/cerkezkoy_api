@@ -267,6 +267,8 @@ class DowntimeMonitor:
         end_h = sh["end_hour"] % 24
         if h < end_h:
             logger.info(f"[{s.line_name}] 60dk sessizlik ama vardiya ortası (saat {h}/{end_h}) — duruş açık tutuluyor")
+            self._start_inactivity(s)   # bir sonraki 60dk penceresinde tekrar bak
+            return
         self._update_reason_api(s, self.SHIFT_END)
         self._auto_stop(s, "Vardiya sonu — otomatik")
 
@@ -294,7 +296,16 @@ class DowntimeMonitor:
                 logger.info(f"[{s.line_name}] Duruş: ID={s.active_downtime_id} ({code})"
                             + (" [stall]" if is_stall else ""))
             elif r.status_code == 409:
+                logger.warning(f"[{s.line_name}] Duruş açılamadı (409) — DB'de zaten açık duruş var, senkronize ediliyor")
                 self._sync(s)
+                # Bayat vardiya-sonu duruşu önü tıkıyorsa: makine YENİ vardiyada tekrar durdu
+                # demektir → eskisini kapat, asıl duruşu aç
+                if s.active_reason_code == self.SHIFT_END:
+                    logger.warning(f"[{s.line_name}] Önde bayat VARDIYA_SONU (ID={s.active_downtime_id}) — kapatılıp gerçek duruş açılıyor")
+                    self._auto_stop(s, "Bayat vardiya sonu — yeni duruş öncesi otomatik kapatıldı")
+                    if not s.active_downtime_id:   # kapatma başarılıysa tekrar dene
+                        self._auto_start(s, reason_code=code, is_stall=is_stall,
+                                         note=note, trigger=trigger, started_at_ts=started_at_ts)
         except Exception as e:
             logger.error(f"API start: {e}")
 
@@ -307,11 +318,13 @@ class DowntimeMonitor:
                 json={"notes": note}, timeout=5)
             if r.status_code == 200:
                 logger.info(f"[{s.line_name}] Kapatıldı: ID={s.active_downtime_id}, {r.json().get('duration_text','?')}")
+                s.active_downtime_id = None; s.active_reason_code = None
+                s.active_is_stall = False; s.cancel_inactivity()
+            else:
+                logger.warning(f"[{s.line_name}] Duruş KAPATILAMADI: ID={s.active_downtime_id} "
+                               f"HTTP {r.status_code} {r.text[:200]} — state korunuyor, tekrar denenecek")
         except Exception as e:
-            logger.error(f"API stop: {e}")
-        finally:
-            s.active_downtime_id = None; s.active_reason_code = None
-            s.active_is_stall = False; s.cancel_inactivity()
+            logger.error(f"[{s.line_name}] API stop hatası: {e} — state korunuyor")
 
     def _update_reason_api(self, s: LineState, code: str):
         import requests

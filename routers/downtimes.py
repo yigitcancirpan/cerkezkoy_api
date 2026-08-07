@@ -655,3 +655,49 @@ def delete_downtime(downtime_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "Duruş bulunamadı")
     db.delete(d); db.commit()
     return {"deleted": downtime_id}
+
+class DowntimeEdit(BaseModel):
+    started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+    reason_id: Optional[int] = None
+    notes: Optional[str] = None
+
+
+@router.patch("/{downtime_id}/edit")
+def edit_downtime(downtime_id: int, req: DowntimeEdit, db: Session = Depends(get_db)):
+    """Duruşun saatini/sebebini elle düzelt. duration_sec yeniden hesaplanır."""
+    d = db.query(Downtime).filter(Downtime.downtime_id == downtime_id).first()
+    if not d:
+        raise HTTPException(404, "Duruş bulunamadı")
+
+    if req.reason_id is not None:
+        reason = db.query(DowntimeReason).filter(DowntimeReason.reason_id == req.reason_id).first()
+        if not reason:
+            raise HTTPException(404, "Sebep bulunamadı")
+        d.reason_id = req.reason_id
+
+    if req.started_at is not None:
+        st = req.started_at
+        if st.tzinfo is None:
+            st = st.replace(tzinfo=timezone.utc)
+        d.started_at = st
+
+    if req.ended_at is not None:
+        en = req.ended_at
+        if en.tzinfo is None:
+            en = en.replace(tzinfo=timezone.utc)
+        d.ended_at = en
+        d.is_active = False          # bitiş verildiyse kapalı say
+
+    # Süreyi yeniden hesapla (kapalıysa)
+    if d.ended_at is not None:
+        if d.ended_at <= d.started_at:
+            raise HTTPException(400, "Bitiş, başlangıçtan sonra olmalı")
+        d.duration_sec = int((d.ended_at - d.started_at).total_seconds())
+
+    if req.notes:
+        d.notes = (d.notes or "") + f"\n[Düzenlendi] {req.notes}"
+    d.updated_at = _now_utc()
+
+    db.commit()
+    return {"downtime_id": d.downtime_id, "duration_sec": d.duration_sec, "message": "Güncellendi"}

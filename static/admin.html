@@ -9,6 +9,7 @@
     --bg:#0a0e17; --panel:#121a2b; --panel2:#0f1626; --border:#1f2a3f;
     --text:#e2e8f0; --muted:#7c8aa3; --accent:#3b82f6; --accent2:#2563eb;
     --ok:#22c55e; --warn:#f59e0b; --danger:#ef4444; --lock:#64748b;
+    --green:#10b981; --blue:#3b82f6; --purple:#8b5cf6; --dim:#7c8aa3;
   }
   *{box-sizing:border-box}
   body{
@@ -16,6 +17,12 @@
     font-family:'DM Sans',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
     font-size:14px;
   }
+  .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;}
+  .top h1{font-size:18px;font-weight:900;}
+  .top h1 span{color:var(--green);}
+  .top-right{display:flex;gap:8px;align-items:center;}
+  .badge{padding:4px 10px;border-radius:6px;font-size:10px;font-weight:700;}
+  .clock{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--dim);}
   header{
     padding:18px 24px; border-bottom:1px solid var(--border);
     display:flex; align-items:center; gap:16px; flex-wrap:wrap;
@@ -99,15 +106,20 @@
 </style>
 </head>
 <body>
-<header>
-  <h1>Yönetim Paneli</h1>
-  <span class="sub">Qs Hattı · Fabrika IoT</span>
-</header>
-
+<div class="top" style="padding:18px 24px 0">
+  <h1>⚙ Hat <span>Yönetimi</span></h1>
+  <div class="top-right">
+    <span class="badge" id="lineBadge" style="background:var(--blue);color:#fff;">—</span>
+    <a class="badge" id="dashLink" href="/static/dashboard.html" style="background:var(--purple);color:#fff;text-decoration:none;">📊 Dashboard</a>
+    <span class="clock" id="clock">--:--:--</span>
+  </div>
+</div>
 <div class="tabs">
   <div class="tab active" data-tab="dt">Duruş Sebepleri</div>
   <div class="tab" data-tab="scrap">Fire Sebepleri</div>
   <div class="tab" data-tab="records">Duruş Kayıtları</div>
+  <div class="tab" data-tab="materials">Malzemeler</div>
+  <div class="tab" data-tab="presses">Presler</div>
   <div class="tab" data-tab="shifts">Vardiyalar</div>
   <div class="tab" data-tab="settings">Ayarlar</div>
 </div>
@@ -136,14 +148,50 @@
     </tr></thead><tbody id="scrap-rows"></tbody></table>
   </div>
 
+ 
   <!-- ── DURUŞ KAYITLARI ── -->
   <div class="section" id="sec-records">
     <div class="row-between">
-      <h2>Son Duruş Kayıtları <span class="sub" style="color:var(--muted)">(son 7 gün)</span></h2>
+      <h2>Duruş Kayıtları</h2>
       <button class="btn" onclick="openManual()">+ Manuel Duruş Ekle</button>
     </div>
-    <p class="hint">Yanlış açılmış otomatik duruşların sebebini değiştir veya kaydı sil. Test sırasında biriken sahte duruşları buradan temizleyebilirsin.</p>
+    <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-bottom:14px">
+      <div><label>Görünüm</label>
+        <select id="rec-mode" onchange="onRecModeChange()" style="width:auto">
+          <option value="range">Son 7 gün</option>
+          <option value="day">Belirli gün</option>
+        </select>
+      </div>
+      <div id="rec-day-wrap" style="display:none"><label>Tarih</label>
+        <input type="date" id="rec-day" onchange="loadRecords()" style="width:auto">
+      </div>
+      <button class="btn ghost sm" onclick="loadRecords()">Yenile</button>
+    </div>
+    <p class="hint">Yanlış açılmış otomatik duruşların sebebini değiştir veya kaydı sil. <span style="color:var(--danger)">Kırmızı çerçeveli</span> kayıtlar zaman olarak başka bir duruşla çakışıyor demektir.</p>
     <div id="records-list"></div>
+  </div>
+  <!-- ── MALZEMELER ── -->
+  <div class="section" id="sec-materials">
+    <div class="row-between">
+      <h2>Malzemeler</h2>
+      <button class="btn" onclick="openMaterial(null)">+ Yeni Malzeme</button>
+    </div>
+    <p class="hint">Pasif malzemeler kurulum ekranında seçilemez ama geçmiş atamalarda görünmeye devam eder. Silme yerine <strong>pasifleştirme</strong> kullanılır — geçmiş veri korunur.</p>
+    <table><thead><tr>
+      <th>Kod</th><th>Ad</th><th>Model</th><th>İdeal Cycle</th><th>Varsayılan Hedef</th><th>Durum</th><th></th>
+    </tr></thead><tbody id="mat-rows"></tbody></table>
+  </div>
+
+  <!-- ── PRESLER ── -->
+  <div class="section" id="sec-presses">
+    <div class="row-between">
+      <h2>Presler / Makineler</h2>
+      <button class="btn" onclick="openPress(null)">+ Yeni Pres</button>
+    </div>
+    <p class="hint">Pres çıkarma <strong>silme değil pasifleştirmedir</strong> — duruş ve atama geçmişi korunur. Aktif malzeme ataması olan pres pasifleştirilemez.</p>
+    <table><thead><tr>
+      <th>Makine</th><th>Tip</th><th>Hat</th><th>Üretici / Model</th><th>Seri No</th><th>Durum</th><th></th>
+    </tr></thead><tbody id="press-rows"></tbody></table>
   </div>
    <!-- ── VARDİYALAR ── -->
   <div class="section" id="sec-shifts">
@@ -249,11 +297,105 @@
     </div>
   </div>
 </div>
+<!-- ── MALZEME MODALI ── -->
+<div class="overlay" id="material-modal">
+  <div class="modal">
+    <h3 id="mat-title">Malzeme</h3>
+    <input type="hidden" id="mat-id">
+    <div class="grid2">
+      <div class="field"><label>Kod <span id="mat-code-note" style="color:var(--lock)"></span></label>
+        <input id="mat-code" class="code" placeholder="ör. QS-1234"></div>
+      <div class="field"><label>Ad</label><input id="mat-name" placeholder="Malzeme adı"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Model ID (opsiyonel)</label><input type="number" id="mat-model"></div>
+      <div class="field"><label>İdeal cycle (saniye)</label><input type="number" id="mat-cycle" step="0.1" min="0.1" placeholder="9.1"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Varsayılan hedef</label><input type="number" id="mat-target" min="0" value="0"></div>
+      <div class="field"><label>Durum</label>
+        <select id="mat-active"><option value="true">Aktif</option><option value="false">Pasif</option></select>
+      </div>
+    </div>
+    <div class="field"><label>Not (opsiyonel)</label><textarea id="mat-notes" rows="2"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeModal('material-modal')">İptal</button>
+      <button class="btn" onclick="saveMaterial()">Kaydet</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── PRES MODALI ── -->
+<div class="overlay" id="press-modal">
+  <div class="modal">
+    <h3 id="press-title">Pres</h3>
+    <input type="hidden" id="pr-id">
+    <div class="field"><label>Makine adı</label><input id="pr-name" placeholder="ör. Pres 1"></div>
+    <div class="grid2">
+      <div class="field"><label>Tip</label>
+        <select id="pr-type">
+          <option value="hydraulic_press">Hidrolik Pres</option>
+          <option value="mechanical_press">Mekanik Pres</option>
+          <option value="other">Diğer</option>
+        </select>
+      </div>
+      <div class="field"><label>Hat</label><select id="pr-line"></select></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Üretici</label><input id="pr-manuf"></div>
+      <div class="field"><label>Model</label><input id="pr-model"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Seri No</label><input id="pr-serial"></div>
+      <div class="field"><label>Durum</label>
+        <select id="pr-status"><option value="active">Aktif</option><option value="inactive">Pasif</option></select>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeModal('press-modal')">İptal</button>
+      <button class="btn" onclick="savePress()">Kaydet</button>
+    </div>
+  </div>
+</div>
+<!-- ── DURUŞ DÜZENLEME MODALI ── -->
+<div class="overlay" id="edit-modal">
+  <div class="modal">
+    <h3>Duruş Düzenle <span id="e-id" class="code"></span></h3>
+    <div class="field"><label>Sebep</label><select id="e-reason"></select></div>
+    <div class="grid2">
+      <div class="field"><label>Başlangıç</label><input type="datetime-local" id="e-start"></div>
+      <div class="field"><label>Bitiş <span style="color:var(--muted)">(boşsa aktif)</span></label><input type="datetime-local" id="e-end"></div>
+    </div>
+    <div class="field"><label>Düzeltme notu (opsiyonel)</label><input id="e-note" placeholder="ör. saat düzeltmesi"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeModal('edit-modal')">İptal</button>
+      <button class="btn" onclick="saveEdit()">Kaydet</button>
+    </div>
+  </div>
+</div>
 <div id="toast"></div>
 
 <script>
 const API = window.location.origin;
-const LINE = 1;
+const LINE = parseInt(new URLSearchParams(location.search).get('line') || '1');
+const LID = parseInt(new URLSearchParams(location.search).get('line') || '1');
+(async () => {
+  document.getElementById('dashLink').href = `/static/dashboard.html?line=${LID}`;
+  try {
+    const r = await fetch(`${API}/api/v1/lines`);
+    if (r.ok) {
+      const line = (await r.json()).find(l => l.line_id === LID);
+      if (line) {
+        document.getElementById('lineBadge').textContent = line.line_name;
+        document.title = `Yönetim Paneli — ${line.line_name}`;
+      }
+    }
+  } catch(e){ console.warn(e); }
+})();
+// Saat
+setInterval(() => {
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString('tr-TR');
+}, 1000);
 const CAT_OPTS = {
   downtime: [['planned','Planlı'],['unplanned','Plansız']],
   scrap: [['quality','Kalite'],['setup','Ayar'],['material','Malzeme'],['other','Diğer']],
@@ -304,6 +446,8 @@ document.querySelectorAll('.tab').forEach(t=>{
     const id = t.dataset.tab;
     document.getElementById('sec-' + id).classList.add('active');
     if(id==='records') loadRecords();
+    if(id==='materials') loadMaterials();
+    if(id==='presses') loadPresses();
     if(id==='shifts') loadShifts();
     if(id==='settings') loadSettings();
   };
@@ -391,21 +535,64 @@ async function saveReason(){
 }
 
 // ── DURUŞ KAYITLARI ──
+function onRecModeChange(){
+  const day = document.getElementById('rec-mode').value === 'day';
+  document.getElementById('rec-day-wrap').style.display = day ? '' : 'none';
+  if(day && !document.getElementById('rec-day').value){
+    document.getElementById('rec-day').value = new Date().toISOString().slice(0,10);
+  }
+  loadRecords();
+}
+
+// İki duruş zaman olarak çakışıyor mu? (aktif olanın bitişi = şimdi)
+function overlaps(a, b){
+  const s1 = new Date(a.started_at).getTime();
+  const e1 = a.ended_at ? new Date(a.ended_at).getTime() : Date.now();
+  const s2 = new Date(b.started_at).getTime();
+  const e2 = b.ended_at ? new Date(b.ended_at).getTime() : Date.now();
+  return s1 < e2 && s2 < e1;   // aralıklar kesişiyor
+}
+
 async function loadRecords(){
   if(!dtReasons.length) await loadReasons('downtime');
-  const from = new Date(Date.now() - 7*864e5).toISOString().slice(0,10);
-  const data = await api('GET', `/api/v1/downtimes/timeline?line_id=${LINE}&date_from=${from}`);
-  const events = (data.events||[]).slice().reverse();  // en yeni üstte
+  const mode = document.getElementById('rec-mode').value;
+  let url;
+  if(mode === 'day'){
+    const d = document.getElementById('rec-day').value || new Date().toISOString().slice(0,10);
+    // o günü kapsa: date_from = gün, date_to = ertesi gün
+    url = `/api/v1/downtimes/timeline?line_id=${LINE}&date_from=${d}&date_to=${d}`;
+  }else{
+    const from = new Date(Date.now() - 7*864e5).toISOString().slice(0,10);
+    url = `/api/v1/downtimes/timeline?line_id=${LINE}&date_from=${from}`;
+  }
+  const data = await api('GET', url);
+  const all = data.events || [];
+
+  // Çakışma tespiti — her kaydı diğerleriyle karşılaştır
+  const flag = new Set();
+  for(let i=0;i<all.length;i++){
+    for(let j=i+1;j<all.length;j++){
+      if(overlaps(all[i], all[j])){ flag.add(all[i].downtime_id); flag.add(all[j].downtime_id); }
+    }
+  }
+
+  const events = all.slice().reverse();  // en yeni üstte
   const opts = dtReasons.map(r=>`<option value="${r.reason_id}">${esc(r.reason_name)}</option>`).join('');
   const list = document.getElementById('records-list');
-  if(!events.length){ list.innerHTML = '<p class="hint">Kayıt yok.</p>'; return; }
-  list.innerHTML = events.map(ev=>{
-    const curId = (dtReasons.find(r=>r.reason_code===ev.reason_code)||{}).reason_id || '';
-    return `<div class="rec">
+  if(!events.length){ list.innerHTML = '<p class="hint">Bu aralıkta kayıt yok.</p>'; return; }
+
+  const clashCount = flag.size;
+  const warn = clashCount ? `<p class="hint" style="color:var(--danger)">⚠ ${clashCount} kayıt başka bir duruşla çakışıyor (kırmızı çerçeveli).</p>` : '';
+
+  list.innerHTML = warn + events.map(ev=>{
+    const clash = flag.has(ev.downtime_id);
+    const style = clash ? ' style="border-color:var(--danger); background:rgba(239,68,68,.06)"' : '';
+    return `<div class="rec"${style}>
       <div>
         <div><span class="swatch" style="background:${esc(ev.color_hex)}"></span>
           <strong>${esc(ev.reason_name)}</strong>
-          ${ev.is_active?'<span class="badge-active">AKTİF</span>':''}</div>
+          ${ev.is_active?'<span class="badge-active">AKTİF</span>':''}
+          ${clash?'<span class="badge-active" style="background:rgba(239,68,68,.15); color:var(--danger)">ÇAKIŞMA</span>':''}</div>
         <div class="meta">${fmtTime(ev.started_at)} → ${ev.is_active?'devam ediyor':fmtTime(ev.ended_at)}
           · ${fmtDur(ev.duration_sec)} · ${esc(ev.shift||'')} · #${ev.downtime_id}</div>
       </div>
@@ -413,10 +600,46 @@ async function loadRecords(){
         <select onchange="changeReason(${ev.downtime_id}, this.value)">
           <option value="">Sebep değiştir…</option>${opts}
         </select>
+        <button class="btn ghost sm" onclick='openEdit(${JSON.stringify(ev)})'>Düzenle</button>
         <button class="btn danger sm" onclick="delRecord(${ev.downtime_id})">Sil</button>
       </div>
     </div>`;
   }).join('');
+}
+// datetime-local input'una UTC ISO'yu yerel saate çevirerek koy
+function toLocalInput(iso){
+  if(!iso) return '';
+  const d = new Date(iso);
+  const off = d.getTimezoneOffset() * 60000;
+  return new Date(d.getTime() - off).toISOString().slice(0,16);
+}
+
+function openEdit(ev){
+  document.getElementById('e-id').textContent = '#' + ev.downtime_id;
+  document.getElementById('edit-modal').dataset.id = ev.downtime_id;
+  document.getElementById('e-reason').innerHTML =
+    dtReasons.map(r=>`<option value="${r.reason_id}" ${r.reason_code===ev.reason_code?'selected':''}>${esc(r.reason_name)}</option>`).join('');
+  document.getElementById('e-start').value = toLocalInput(ev.started_at);
+  document.getElementById('e-end').value = ev.ended_at ? toLocalInput(ev.ended_at) : '';
+  document.getElementById('e-note').value = '';
+  document.getElementById('edit-modal').classList.add('show');
+}
+
+async function saveEdit(){
+  const id = document.getElementById('edit-modal').dataset.id;
+  const start = document.getElementById('e-start').value;
+  const end = document.getElementById('e-end').value;
+  if(!start) return toast('Başlangıç gerekli', false);
+  const body = {
+    reason_id: parseInt(document.getElementById('e-reason').value),
+    started_at: new Date(start).toISOString(),
+    ended_at: end ? new Date(end).toISOString() : null,
+    notes: document.getElementById('e-note').value || null,
+  };
+  try{
+    await api('PATCH', `/api/v1/downtimes/${id}/edit`, body);
+    closeModal('edit-modal'); toast('Duruş güncellendi'); loadRecords();
+  }catch(e){ toast(e.message, false); }
 }
 async function changeReason(id, reasonId){
   if(!reasonId) return;
@@ -437,17 +660,40 @@ async function openManual(){
   document.getElementById('m-reason').innerHTML =
     dtReasons.map(r=>`<option value="${r.reason_id}">${esc(r.reason_name)}</option>`).join('');
   ['m-start','m-end','m-op','m-note'].forEach(id=>document.getElementById(id).value='');
+
+  // "Belirli gün" görünümündeysek o günü başlangıç/bitişe hazır koy (saat 08:00 / 08:00)
+  const mode = document.getElementById('rec-mode').value;
+  const day = document.getElementById('rec-day').value;
+  if(mode === 'day' && day){
+    document.getElementById('m-start').value = `${day}T08:00`;
+    document.getElementById('m-end').value   = `${day}T08:00`;
+  }
   document.getElementById('manual-modal').classList.add('show');
 }
 async function saveManual(){
   const start = document.getElementById('m-start').value;
   const end = document.getElementById('m-end').value;
   if(!start) return toast('Başlangıç gerekli', false);
+  const startISO = new Date(start).toISOString();
+  const endISO = end ? new Date(end).toISOString() : null;
+
+  // ── Çakışma kontrolü: aynı gündeki mevcut duruşlarla karşılaştır ──
+  const dayStr = start.slice(0,10);
+  try{
+    const chk = await api('GET', `/api/v1/downtimes/timeline?line_id=${LINE}&date_from=${dayStr}&date_to=${dayStr}`);
+    const cand = {started_at: startISO, ended_at: endISO};
+    const clashes = (chk.events||[]).filter(ev=>overlaps(cand, ev));
+    if(clashes.length){
+      const list = clashes.slice(0,3).map(c=>`• ${c.reason_name} (${fmtTime(c.started_at)}→${c.is_active?'devam':fmtTime(c.ended_at)})`).join('\n');
+      if(!confirm(`Bu aralık ${clashes.length} mevcut duruşla çakışıyor:\n\n${list}\n\nYine de eklensin mi?`)) return;
+    }
+  }catch(e){ /* kontrol başarısızsa eklemeyi engelleme */ }
+
   const body = {
     line_id: LINE,
     reason_id: parseInt(document.getElementById('m-reason').value),
-    started_at: new Date(start).toISOString(),       // tarayıcı yerel saati → UTC
-    ended_at: end ? new Date(end).toISOString() : null,
+    started_at: startISO,
+    ended_at: endISO,
     operator_name: document.getElementById('m-op').value || null,
     notes: document.getElementById('m-note').value || null,
   };
@@ -455,6 +701,159 @@ async function saveManual(){
     await api('POST', '/api/v1/downtimes/manual', body);
     closeModal('manual-modal'); toast('Manuel duruş eklendi'); loadRecords();
   }catch(e){ toast(e.message, false); }
+}
+// ── MALZEMELER ──
+async function loadMaterials(){
+  const rows = await api('GET', '/api/v1/assignments/materials?include_inactive=true');
+  const tbody = document.getElementById('mat-rows');
+  if(!rows.length){ tbody.innerHTML = '<tr><td colspan="7" class="hint">Malzeme yok.</td></tr>'; return; }
+  tbody.innerHTML = rows.map(m=>`
+    <tr>
+      <td class="code">${esc(m.material_code)}</td>
+      <td><strong>${esc(m.material_name)}</strong></td>
+      <td>${m.model_id ?? '—'}</td>
+      <td>${m.ideal_cycle_ds ? (m.ideal_cycle_ds/10).toFixed(1)+' sn' : '—'}</td>
+      <td>${m.default_target ?? 0}</td>
+      <td><span class="pill ${m.is_active?'on':'off'}">${m.is_active?'Aktif':'Pasif'}</span></td>
+      <td style="text-align:right; white-space:nowrap">
+        <button class="btn ghost sm" onclick='openMaterial(${JSON.stringify(m)})'>Düzenle</button>
+        ${m.is_active
+          ? `<button class="btn danger sm" onclick="setMaterialActive(${m.material_id}, false)">Pasifleştir</button>`
+          : `<button class="btn ghost sm" onclick="setMaterialActive(${m.material_id}, true)">Aktifleştir</button>`}
+      </td>
+    </tr>`).join('');
+}
+
+function openMaterial(m){
+  document.getElementById('mat-title').textContent = m ? 'Malzeme Düzenle' : 'Yeni Malzeme';
+  const codeInp = document.getElementById('mat-code');
+  const note = document.getElementById('mat-code-note');
+  if(m){
+    document.getElementById('mat-id').value = m.material_id;
+    codeInp.value = m.material_code; codeInp.readOnly = true;
+    note.textContent = '(değiştirilemez)';
+    document.getElementById('mat-name').value = m.material_name || '';
+    document.getElementById('mat-model').value = m.model_id ?? '';
+    document.getElementById('mat-cycle').value = m.ideal_cycle_ds ? (m.ideal_cycle_ds/10) : '';
+    document.getElementById('mat-target').value = m.default_target ?? 0;
+    document.getElementById('mat-notes').value = m.notes || '';
+    document.getElementById('mat-active').value = String(m.is_active);
+  }else{
+    document.getElementById('mat-id').value = '';
+    codeInp.value = ''; codeInp.readOnly = false; note.textContent = '';
+    ['mat-name','mat-model','mat-cycle','mat-notes'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('mat-target').value = 0;
+    document.getElementById('mat-active').value = 'true';
+  }
+  document.getElementById('material-modal').classList.add('show');
+}
+
+async function saveMaterial(){
+  const id = document.getElementById('mat-id').value;
+  const name = document.getElementById('mat-name').value.trim();
+  if(!name) return toast('Malzeme adı gerekli', false);
+  const cycSec = parseFloat(document.getElementById('mat-cycle').value);
+  const body = {
+    material_name: name,
+    model_id: document.getElementById('mat-model').value ? parseInt(document.getElementById('mat-model').value) : null,
+    ideal_cycle_ds: cycSec ? Math.round(cycSec*10) : null,   // saniye → desisaniye
+    default_target: parseInt(document.getElementById('mat-target').value)||0,
+    notes: document.getElementById('mat-notes').value || null,
+  };
+  try{
+    if(id){
+      body.is_active = document.getElementById('mat-active').value === 'true';
+      await api('PATCH', `/api/v1/assignments/materials/${id}`, body);
+    }else{
+      const code = document.getElementById('mat-code').value.trim();
+      if(!code) return toast('Malzeme kodu gerekli', false);
+      await api('POST', '/api/v1/assignments/materials', {...body, material_code: code});
+    }
+    closeModal('material-modal'); toast('Kaydedildi'); loadMaterials();
+  }catch(e){ toast(e.message, false); }
+}
+
+async function setMaterialActive(id, active){
+  if(!active && !confirm('Bu malzeme pasifleştirilsin mi? Kurulum ekranında seçilemez olur.')) return;
+  try{
+    await api('PATCH', `/api/v1/assignments/materials/${id}`, {is_active: active});
+    toast(active?'Aktifleştirildi':'Pasifleştirildi'); loadMaterials();
+  }catch(e){ toast(e.message, false); }
+}
+
+// ── PRESLER ──
+let linesCache = [];
+async function loadPresses(){
+  try{ linesCache = await api('GET', '/api/v1/lines'); }catch(e){ linesCache = []; }
+  const rows = await api('GET', '/api/v1/machines/');
+  const tbody = document.getElementById('press-rows');
+  if(!rows.length){ tbody.innerHTML = '<tr><td colspan="7" class="hint">Makine yok.</td></tr>'; return; }
+  const lineName = id => (linesCache.find(l=>l.line_id===id)||{}).line_name || ('Hat '+id);
+  const TYPE = {hydraulic_press:'Hidrolik', mechanical_press:'Mekanik'};
+  tbody.innerHTML = rows.map(m=>{
+    const act = (m.status||'active') === 'active';
+    return `<tr>
+      <td><strong>${esc(m.machine_name)}</strong></td>
+      <td>${esc(TYPE[m.machine_type] || m.machine_type || '—')}</td>
+      <td>${esc(lineName(m.line_id))}</td>
+      <td>${esc(m.manufacturer||'—')}${m.model?' / '+esc(m.model):''}</td>
+      <td class="code">${esc(m.serial_number||'—')}</td>
+      <td><span class="pill ${act?'on':'off'}">${act?'Aktif':'Pasif'}</span></td>
+      <td style="text-align:right; white-space:nowrap">
+        <button class="btn ghost sm" onclick='openPress(${JSON.stringify(m)})'>Düzenle</button>
+        ${act ? `<button class="btn danger sm" onclick="deactivatePress(${m.machine_id})">Çıkar</button>` : ''}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function openPress(m){
+  document.getElementById('press-title').textContent = m ? 'Pres Düzenle' : 'Yeni Pres';
+  const lineSel = document.getElementById('pr-line');
+  lineSel.innerHTML = linesCache.map(l=>`<option value="${l.line_id}">${esc(l.line_name)}</option>`).join('');
+  if(m){
+    document.getElementById('pr-id').value = m.machine_id;
+    document.getElementById('pr-name').value = m.machine_name || '';
+    document.getElementById('pr-type').value = m.machine_type || 'hydraulic_press';
+    lineSel.value = m.line_id;
+    document.getElementById('pr-manuf').value = m.manufacturer || '';
+    document.getElementById('pr-model').value = m.model || '';
+    document.getElementById('pr-serial').value = m.serial_number || '';
+    document.getElementById('pr-status').value = m.status || 'active';
+  }else{
+    document.getElementById('pr-id').value = '';
+    ['pr-name','pr-manuf','pr-model','pr-serial'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('pr-type').value = 'hydraulic_press';
+    lineSel.value = LID;
+    document.getElementById('pr-status').value = 'active';
+  }
+  document.getElementById('press-modal').classList.add('show');
+}
+
+async function savePress(){
+  const id = document.getElementById('pr-id').value;
+  const name = document.getElementById('pr-name').value.trim();
+  if(!name) return toast('Makine adı gerekli', false);
+  const body = {
+    machine_name: name,
+    machine_type: document.getElementById('pr-type').value,
+    line_id: parseInt(document.getElementById('pr-line').value),
+    manufacturer: document.getElementById('pr-manuf').value || null,
+    model: document.getElementById('pr-model').value || null,
+    serial_number: document.getElementById('pr-serial').value || null,
+    status: document.getElementById('pr-status').value,
+  };
+  try{
+    if(id) await api('PATCH', `/api/v1/machines/${id}`, body);
+    else    await api('POST', '/api/v1/machines/', body);
+    closeModal('press-modal'); toast('Kaydedildi'); loadPresses();
+  }catch(e){ toast(e.message, false); }
+}
+
+async function deactivatePress(id){
+  if(!confirm('Bu pres hattan çıkarılsın mı? (Silinmez, pasifleştirilir — geçmiş korunur)')) return;
+  try{ await api('DELETE', `/api/v1/machines/${id}`); toast('Pres pasifleştirildi'); loadPresses(); }
+  catch(e){ toast(e.message, false); }
 }
 // ── VARDİYALAR ──
 async function loadShifts(){

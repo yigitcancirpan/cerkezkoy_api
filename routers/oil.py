@@ -56,7 +56,11 @@ def get_history(
     if press_id:
         where_clause += " AND press_id = :pid"
         params["pid"] = press_id
-    
+
+    if line_id:
+        where_clause += " AND line_id = :lid"
+        params["lid"] = line_id
+
     rows = db.execute(text(f"""
         SELECT press_id, level, temperature, recorded_at
         FROM press_oil
