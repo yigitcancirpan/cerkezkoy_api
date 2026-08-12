@@ -149,7 +149,7 @@ function render(states){
   rowsEl.innerHTML = states.map(s => {
     const st  = statusOf(s.prod);
     const mat = materialOf(s.prod, s.assign);
-    const produced = s.prod?.produced ?? s.prod?.shift_produced ?? '—';
+    const produced = s.prod?.shift_produced ?? s.prod?.produced ?? '—';
     const target   = s.prod?.target ?? null;
     const pct = (target && produced !== '—') ? Math.min(100, Math.round(produced/target*100)) : null;
     return `

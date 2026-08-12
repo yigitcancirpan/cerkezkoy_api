@@ -216,7 +216,7 @@ class ProductionLogger:
             # ── Dinamik payda: window (taban) − OEE-hariç süreler (mola+vardiya sonu) ──
             # Bitmiş vardiya özeti → pencere TAM taban (window_so_far değil).
             import shift_utils
-            window = shift_utils.planned_seconds(shift_code)   # taban, örn. 36000 (10s)
+            window = shift_utils.planned_seconds(shift_code, line_id=line_id, dt=d)
             total_time = window                                # raporda gösterilen tam pencere
 
             planned = max(window - excluded_dt, 60)            # mola paydadan düşülür
@@ -224,7 +224,11 @@ class ProductionLogger:
 
             # OEE
             availability = min(run_time / planned * 100, 100.0) if planned > 0 else 0
-            ideal_sec = (avg_cycle / 10.0) if avg_cycle > 0 else 8.0   # ⚠ desisaniye → saniye
+            # İdeal cycle: hat konfigürasyonundan (OEE standardı), yoksa ölçülen ortalama
+            cur.execute("SELECT ideal_cycle_ds FROM production_lines WHERE line_id=%s", (line_id,))
+            _ic = cur.fetchone()
+            ideal_ds = (_ic["ideal_cycle_ds"] if _ic and _ic["ideal_cycle_ds"] else None) or avg_cycle
+            ideal_sec = (ideal_ds / 10.0) if ideal_ds > 0 else 8.0
             performance = (produced * ideal_sec / run_time * 100) if run_time > 0 else 0
             performance = min(performance, 100.0)
             quality = (good / produced * 100) if produced > 0 else 100
@@ -301,7 +305,7 @@ class ProductionLogger:
                 s.last_activity_time = time.time()
 
                 # Vardiya/gün değişimi tespiti
-                now = datetime.now()
+                now = datetime.now().astimezone()
                 current_shift = shift_utils.detect_shift_code()
                 today = now.strftime("%Y-%m-%d")
                 shift_key = f"{today}_{current_shift}"
@@ -392,7 +396,7 @@ class ProductionLogger:
         
         while self._running:
             try:
-                now = datetime.now()
+                now = datetime.now().astimezone()
                 
                 for shift in shift_utils.get_shifts():
                     shift_code = shift["code"]
@@ -477,7 +481,7 @@ class ProductionLogger:
         Bugünün henüz bitmemiş vardiyaları için _resolve_shift_date None döner,
         o yüzden onlar zaten atlanır.
         """
-        now = datetime.now()
+        now = datetime.now().astimezone()
         today = now.date()
         
         for day_offset in range(days_back, -1, -1):

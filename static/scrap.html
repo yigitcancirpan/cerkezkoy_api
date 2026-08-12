@@ -70,7 +70,7 @@
 
 <div class="top">
   <h1>🗑 Fire <span>Analizi</span></h1>
-  <a class="back" href="/static/dashboard.html">← Dashboard</a>
+  <a class="back" id="dashLink" href="/static/dashboard.html">← Dashboard</a>
 </div>
 <div class="sub" id="sub">—</div>
 
@@ -252,7 +252,23 @@ document.querySelectorAll('.chart-card').forEach(c=>c.addEventListener('click',(
 
 /* ─── veri ─── */
 const params=new URLSearchParams(location.search);
-const urlDate=params.get('date'); const urlShift=params.get('shift'); const lineId=params.get('line_id')||1;
+const urlDate=params.get('date'); const urlShift=params.get('shift');
+const lineId=params.get('line_id')||params.get('line')||1;   // dashboard ?line= ile geliyor
+let LINE_NAME='';
+document.getElementById('dashLink').href = `/static/dashboard.html?line=${lineId}`;
+(async () => {
+  try{
+    const r = await fetch(`${API}/api/v1/lines`);
+    if(r.ok){
+      const line = (await r.json()).find(l => l.line_id === +lineId);
+      if(line){
+        LINE_NAME = line.line_name + ' · ';
+        document.title = `Fire Analizi — ${line.line_name}`;
+        load();   // hat adı geldi, altyazıyı tazele
+      }
+    }
+  }catch(e){ console.warn(e); }
+})();
 let rangeDays=15;
 let singleDate=null;   // 'Bugün' veya tarih seçici
 const SHIFT_LABEL={vardiya_1:'1. Vardiya',vardiya_2:'2. Vardiya',vardiya_3:'3. Vardiya'};
@@ -291,12 +307,12 @@ async function load(){
   let qs=`line_id=${lineId}&date_from=${from}&date_to=${to}`;
   if(urlDate){
     if(urlShift) qs+=`&shift=${urlShift}`;
-    document.getElementById('sub').textContent=`${fmtDM(urlDate)} · ${SHIFT_LABEL[urlShift]||urlShift||'Tüm vardiyalar'}`;
+    document.getElementById('sub').textContent=`${LINE_NAME}${fmtDM(urlDate)} · ${SHIFT_LABEL[urlShift]||urlShift||'Tüm vardiyalar'}`;
     document.getElementById('rangeSeg').parentElement.style.display='none';
   }else if(singleDate){
-    document.getElementById('sub').textContent=`${fmtDM(singleDate)} · tek gün`;
+    document.getElementById('sub').textContent=`${LINE_NAME}${fmtDM(singleDate)} · tek gün`;
   }else{
-    document.getElementById('sub').textContent=`Son ${rangeDays} gün`;
+    document.getElementById('sub').textContent=`${LINE_NAME}Son ${rangeDays} gün`;
   }
   try{
     const r=await fetch(`${API}/api/v1/scrap/analysis?${qs}`);

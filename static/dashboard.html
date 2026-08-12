@@ -102,7 +102,7 @@
   </div>
   <div class="card">
     <div class="card-label">Fire</div>
-    <a href="/static/scrap.html" target="_blank" style="font-size:11px;color:var(--purple);text-decoration:none;">📊 Analiz →</a>
+    <a href="/static/scrap.html" id="scrapLink" target="_blank" style="font-size:11px;color:var(--purple);text-decoration:none;">📊 Analiz →</a>
     <div class="card-value" style="color:var(--red);" id="scrap">—</div>
     <div class="card-sub" id="qualitySub">Kalite: —</div>
   </div>
@@ -240,39 +240,16 @@
 <script>
 const API = window.location.origin;
 const LID = parseInt(new URLSearchParams(location.search).get('line') || '1');
+// Tüm sayfa linklerine hattı taşı
+[['scrapLink','scrap.html'], ['setupLink','setup.html'], ['adminLink','admin.html'],
+ ['analyticsLink','analytics.html'], ['downtimeLink','downtime_monitor.html']
+].forEach(([id, page]) => {
+  const a = document.getElementById(id);
+  if (a) a.href = `/static/${page}?line=${LID}`;
+});
+
+// Hat adını başlığa yaz (tek istek)
 (async () => {
-  document.getElementById('setupLink').href = `/static/setup.html?line=${LID}`;   // ← eklendi
-
-  try {
-    const r = await fetch(`${API}/api/v1/lines`);
-    if (r.ok) {
-      const line = (await r.json()).find(l => l.line_id === LID);
-      if (line) {
-        document.getElementById('lineBadge').textContent = line.line_name;
-        document.title = `${line.line_name} — Üretim Dashboard`;
-      }
-    }
-  } catch(e) { console.warn(e); }
-})();
-(async () => {
-  document.getElementById('adminLink').href = `/static/admin.html?line=${LID}`;   // ← eklendi
-
-  try {
-    const r = await fetch(`${API}/api/v1/lines`);
-    if (r.ok) {
-      const line = (await r.json()).find(l => l.line_id === LID);
-      if (line) {
-        document.getElementById('lineBadge').textContent = line.line_name;
-        document.title = `${line.line_name} — Üretim Dashboard`;
-      }
-    }
-  } catch(e) { console.warn(e); }
-})();
-document.getElementById('analyticsLink').href = `/static/analytics.html?line=${LID}`;
-
-(async () => {
-  document.getElementById('downtimeLink').href = `/static/downtime_monitor.html?line=${LID}`;   // ← eklendi
-
   try {
     const r = await fetch(`${API}/api/v1/lines`);
     if (r.ok) {

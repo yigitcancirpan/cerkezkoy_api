@@ -36,7 +36,7 @@ _DEFAULT_DB_URL = os.getenv(
 _TTL = 60.0  # saniye
 
 _lock = threading.Lock()
-_state = {"ts": 0.0, "shifts": [], "excluded": set()}
+_state = {"ts": 0.0, "shifts": [], "excluded": set(), "overrides": []}
 _db_url = _DEFAULT_DB_URL
 _conn = None
 
@@ -66,12 +66,22 @@ def _refresh():
         cur = db.cursor(cursor_factory=RealDictCursor)
         cur.execute("""
             SELECT code, label, start_hour, end_hour, latest_end,
-                   window_hours, planned_seconds, display_order, is_active, line_id
+                   window_hours, planned_seconds, display_order, is_active,
+                   line_id, day_of_week
             FROM shift_config
             WHERE is_active = TRUE
             ORDER BY display_order, start_hour
         """)
         shifts = [dict(r) for r in cur.fetchall()]
+
+        # Tarihe özel istisnalar (son 60 gün + gelecek) — cache'e alınır
+        cur.execute("""
+            SELECT override_date, code, line_id, label, start_hour, end_hour,
+                   latest_end, window_hours, planned_seconds
+            FROM shift_overrides
+            WHERE override_date >= CURRENT_DATE - 60
+        """)
+        _state["overrides"] = [dict(r) for r in cur.fetchall()]
 
         cur.execute("""
             SELECT reason_code FROM downtime_reasons WHERE exclude_from_oee = TRUE
@@ -107,16 +117,45 @@ def invalidate():
 
 
 # ── Dışa açık API ──
-def get_shifts(force=False, line_id=None):
-    """line_id verilirse: o hatta özel satırlar; yoksa global (line_id IS NULL) satırlar."""
+def get_shifts(force=False, line_id=None, dt=None):
+    """Çözümleme sırası: tarih istisnası → gün kuralı → global varsayılan.
+    dt: date veya datetime; None ise bugün."""
     _ensure(force)
-    allrows = _state["shifts"]
-    if line_id is not None:
-        specific = [s for s in allrows if s.get("line_id") == line_id]
-        if specific:
-            return specific
-    return [s for s in allrows if s.get("line_id") is None] or list(allrows)
+    d = dt or datetime.now()
+    the_date = d.date() if isinstance(d, datetime) else d
+    pg_dow = (the_date.weekday() + 1) % 7      # 0=Pazar ... 6=Cumartesi
 
+    def _line_filter(rows):
+        if line_id is not None:
+            spec = [r for r in rows if r.get("line_id") == line_id]
+            if spec:
+                return spec
+        return [r for r in rows if r.get("line_id") is None] or rows
+
+    # 1) Tarihe özel istisna
+    ovr = _line_filter([o for o in _state.get("overrides", [])
+                        if o["override_date"] == the_date])
+    if ovr:
+        base = {s["code"]: dict(s) for s in _state["shifts"]}
+        out = []
+        for o in ovr:
+            row = base.get(o["code"], dict(_FALLBACK_SHIFT)).copy()
+            row.update({k: v for k, v in o.items()
+                        if v is not None and k != "override_date"})
+            row.setdefault("display_order", 1)
+            row["is_active"] = True
+            out.append(row)
+        return out
+
+    # 2) Güne özel kural (Cumartesi vb.)
+    day_rows = _line_filter([s for s in _state["shifts"]
+                             if s.get("day_of_week") == pg_dow])
+    if day_rows:
+        return day_rows
+
+    # 3) Global varsayılan
+    return _line_filter([s for s in _state["shifts"]
+                         if s.get("day_of_week") is None]) or list(_state["shifts"])
 
 def get_excluded_codes(force=False):
     """OEE'den hariç tutulacak reason_code'lar (mola + vardiya sonu)."""
@@ -135,7 +174,7 @@ def _in_window(h: int, start: int, end: int) -> bool:
 def detect_shift(dt: datetime = None, line_id: int = None):
     dt = dt or datetime.now()
     h = dt.hour
-    shifts = get_shifts(line_id=line_id)
+    shifts = get_shifts(line_id=line_id, dt=dt)
     for s in shifts:
         if _in_window(h, s["start_hour"], s["end_hour"]):
             return s["code"], s["label"]
@@ -147,15 +186,16 @@ def detect_shift_code(dt: datetime = None, line_id: int = None) -> str:
     return detect_shift(dt, line_id)[0]
 
 
-def shift_by_code(code: str, line_id: int = None):
-    for s in get_shifts(line_id=line_id):
+def shift_by_code(code: str, line_id: int = None, dt=None):
+    for s in get_shifts(line_id=line_id, dt=dt):
         if s["code"] == code:
             return s
-    return get_shifts(line_id=line_id)[0]
+    return get_shifts(line_id=line_id, dt=dt)[0]
 
 
-def planned_seconds(code: str, line_id: int = None) -> int:
-    return int(shift_by_code(code, line_id).get("planned_seconds") or _FALLBACK_SHIFT["planned_seconds"])
+def planned_seconds(code: str, line_id: int = None, dt=None) -> int:
+    return int(shift_by_code(code, line_id, dt).get("planned_seconds")
+               or _FALLBACK_SHIFT["planned_seconds"])
 
 
 def resolve_shift_date(shift: dict, now: datetime):

@@ -73,7 +73,8 @@
 
 <div class="top">
   <h1>⏱ Duruş <span>Analizi</span></h1>
-  <a class="back" href="/static/dashboard.html">← Dashboard</a>
+  <a class="back" id="dashLink" href="/static/dashboard.html"
+     style="background:var(--purple);color:#fff;border-color:var(--purple);">📊 Dashboard</a>
 </div>
 <div class="sub" id="sub">—</div>
 
@@ -161,7 +162,23 @@ function tipPosition(tip,container,e){const r=container.getBoundingClientRect();
 function fmtDur(sec){sec=Math.round(sec);if(sec<60)return sec+' sn';const m=Math.floor(sec/60);if(m<60)return m+' dk';const h=Math.floor(m/60);return h+' sa '+(m%60)+' dk';}
 function fmtDM(iso){if(!iso)return '';const d=new Date(iso+'T00:00:00');return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`;}
 function csvColor(c){return c||'var(--dim)';}
-
+const _p = new URLSearchParams(location.search);
+const LID = parseInt(_p.get('line_id') || _p.get('line') || '1');
+(async () => {
+  document.getElementById('dashLink').href = `/static/dashboard.html?line=${LID}`;
+  try {
+    const r = await fetch(`${API}/api/v1/lines`);
+    if (r.ok) {
+      const line = (await r.json()).find(l => l.line_id === LID);
+      if (line) {
+        document.title = `Duruş Analizi — ${line.line_name}`;
+        const sub = document.getElementById('sub');
+        if (sub && !sub.textContent.includes(line.line_name))
+          sub.textContent = `${line.line_name} · ${sub.textContent}`;
+      }
+    }
+  } catch(e){ console.warn(e); }
+})();
 /* ─── Pareto (yatay bar) ─── */
 function paretoChart(container, items){
   clear(container);

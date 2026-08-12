@@ -98,11 +98,11 @@ def get_current(line_id: int, db: Session = Depends(get_db)):
     if first_row and first_row[0]:
         result["first_cycle_at"] = first_row[0]   # snapshot'ı override et
 
-    # Vardiya içi üretim
-    shift_produced = (result.get("produced") or 0) - (result.get("shift_start_produced") or 0)
-    result["shift_produced"] = max(shift_produced, 0)
+    # Vardiya içi üretim — tek kaynak: production_log MAX−MIN (yukarıda hesaplandı)
+    # shift_produced, produced_shift'in takma adı (frontend/terminal bu ismi kullanıyor)
+    result["shift_produced"] = result["produced_shift"]
 
-    eta = _calc_eta(result.get("produced"), result.get("target"), result.get("average_cycle"))
+    eta = _calc_eta(result["produced_shift"], result.get("target"), result.get("average_cycle"))
     result["eta"] = eta
 
     return result
@@ -172,8 +172,8 @@ def calculate_summary_now(
     # Çalışma süresi hesapla
     # ── Planlanan süre: vardiya başlangıcından ŞİMDİYE kadar ──
     # ── Dinamik payda: window (taban) − OEE-hariç süreler ──
-    sh = shift_utils.shift_by_code(shift_code)
-    window = shift_utils.planned_seconds(shift_code)       # taban, örn. 36000 (10s)
+    sh = shift_utils.shift_by_code(shift_code, line_id=line_id, dt=today)
+    window = shift_utils.planned_seconds(shift_code, line_id=line_id, dt=today)
 
     now_dt = datetime.now()
     shift_start = now_dt.replace(hour=sh["start_hour"], minute=0, second=0, microsecond=0)
@@ -186,8 +186,13 @@ def calculate_summary_now(
     run_time = max(planned - unplanned_dt, 1)              # gerçek çalışma = payda − kayıp duruş
 
     availability = min(run_time / planned * 100, 100.0) if planned > 0 else 0
-    ideal = avg_cycle / 10.0 if avg_cycle > 0 else 8.0
-    performance = min((produced * ideal / run_time * 100) if run_time > 0 else 0, 100.0)
+    # İdeal cycle: hat konfigürasyonundan (OEE standardı), yoksa ölçülen ortalama
+    _ic = db.execute(text(
+        "SELECT ideal_cycle_ds FROM production_lines WHERE line_id = :lid"
+    ), {"lid": line_id}).fetchone()
+    ideal_ds = (_ic[0] if _ic and _ic[0] else None) or avg_cycle
+    ideal_sec = (ideal_ds / 10.0) if ideal_ds and ideal_ds > 0 else 8.0
+    performance = min((produced * ideal_sec / run_time * 100) if run_time > 0 else 0, 100.0)
     quality = (good / produced * 100) if produced > 0 else 100
     oee = availability * performance * quality / 10000
 
