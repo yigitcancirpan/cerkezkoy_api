@@ -22,7 +22,7 @@ shifts = [
 ]
 
 svc = ProductionLogger(
-    db_url=os.getenv("DB_URL", "postgresql://yigitcanc:***REMOVED***@127.0.0.1:5432/cerkezkoy_db"),
+    db_url=os.environ["DB_URL"],
     shifts_config=shifts,
 )
 

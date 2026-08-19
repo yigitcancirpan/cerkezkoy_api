@@ -30,9 +30,7 @@ _FALLBACK_SHIFT = {
     "window_hours": 10, "planned_seconds": 36000, "display_order": 1, "is_active": True,
 }
 
-_DEFAULT_DB_URL = os.getenv(
-    "DB_URL", "postgresql://yigitcanc:***REMOVED***@127.0.0.1:5432/cerkezkoy_db"
-)
+_DEFAULT_DB_URL = os.getenv("DB_URL")
 _TTL = 60.0  # saniye
 
 _lock = threading.Lock()
@@ -52,9 +50,17 @@ def configure(db_url: str = None, ttl: float = None):
 
 def _get_conn():
     global _conn
+
+    if not _db_url:
+        raise RuntimeError(
+            "DB_URL ortam değişkeni tanımlı değil; "
+            "gizli DB bilgileri kod içinden okunmaz"
+        )
+
     if _conn is None or _conn.closed:
         _conn = psycopg2.connect(_db_url)
         _conn.autocommit = True
+
     return _conn
 
 

@@ -6,6 +6,14 @@
 #   sudo bash kurulum_servisler.sh
 # ============================================================
 
+ENV_FILE=/etc/cerkezkoy-api/cerkezkoy-api.env
+
+if [ ! -r "$ENV_FILE" ]; then
+    echo "HATA: Ortam dosyası okunamıyor: $ENV_FILE" >&2
+    echo "Önce root:server sahipliğinde ve 640 izniyle güvenli env dosyasını oluşturun." >&2
+    exit 1
+fi
+
 echo "═══════════════════════════════════════"
 echo "  Pi 3B — Servis Kurulumu"
 echo "═══════════════════════════════════════"
@@ -24,6 +32,7 @@ Wants=mosquitto.service postgresql.service
 Type=simple
 User=server
 WorkingDirectory=/home/server/cerkezkoy_api
+EnvironmentFile=/etc/cerkezkoy-api/cerkezkoy-api.env
 ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=5
@@ -49,6 +58,7 @@ Wants=mosquitto.service cerkezkoy_api.service
 Type=simple
 User=server
 WorkingDirectory=/home/server/cerkezkoy_api
+EnvironmentFile=/etc/cerkezkoy-api/cerkezkoy-api.env
 Environment=PYTHONPATH=/home/server/cerkezkoy_api
 Environment=API_URL=http://127.0.0.1:8000
 Environment=MQTT_HOST=127.0.0.1
@@ -82,7 +92,7 @@ Type=simple
 User=server
 WorkingDirectory=/home/server/cerkezkoy_api
 Environment=PYTHONPATH=/home/server/cerkezkoy_api
-Environment=DB_URL=postgresql://yigitcanc:***REMOVED***@127.0.0.1:5432/cerkezkoy_db
+EnvironmentFile=/etc/cerkezkoy-api/cerkezkoy-api.env
 Environment=MQTT_HOST=127.0.0.1
 Environment=LOG_INTERVAL=60
 Environment=SHIFT_END_SILENCE=30
@@ -129,9 +139,5 @@ echo "  journalctl -u downtime_monitor -f"
 echo "  journalctl -u production_logger -f"
 echo ""
 
-# ⚠ production_logger.service içindeki DB_URL şifresini değiştirmeyi unutma!
-echo "⚠ /etc/systemd/system/production_logger.service"
-echo "  içindeki SIFREN'i kendi şifrenle değiştir:"
-echo "  sudo nano /etc/systemd/system/production_logger.service"
-echo "  sudo systemctl daemon-reload"
-echo "  sudo systemctl restart production_logger"
+echo "Gizli bilgiler systemd servis dosyalarına yazılmaz."
+echo "Ortam dosyası: $ENV_FILE"
