@@ -31,10 +31,12 @@ MQTT topic'leri (Pi4 → Pi3B):
 import json
 import time
 import logging
+import os
 import threading
 from datetime import datetime, timezone
 from typing import Optional
 import paho.mqtt.client as mqtt
+import requests
 import shift_utils
 
 logger = logging.getLogger("downtime_monitor")
@@ -111,6 +113,22 @@ class DowntimeMonitor:
 
         self._reason_ids = {}  # code → id
         self._running = False
+        self._api_lock = threading.RLock()
+        self._http = requests.Session()
+
+    def _request(self, method: str, path: str, **kwargs):
+        """Yerel API isteklerini tek oturumda ve thread-safe olarak yap."""
+        kwargs.setdefault("timeout", 5)
+        with self._api_lock:
+            return self._http.request(method, f"{self.api_url}{path}", **kwargs)
+
+    @staticmethod
+    def _clear_active_state(s: LineState):
+        """API'de aktif kayıt kalmadığında yerel duruş state'ini temizle."""
+        s.active_downtime_id = None
+        s.active_reason_code = None
+        s.active_is_stall = False
+        s.cancel_inactivity()
 
     # ── MQTT ──
     def _on_connect(self, client, userdata, flags, rc, properties=None):
@@ -176,6 +194,9 @@ class DowntimeMonitor:
             logger.info(f"[{s.line_name}] auto_cycle_on: {prev} → False (durdu) → grace ({self.grace_sec}sn)")
             s.stop_detected_at = time.time()
             s.produced_at_stop = s.last_produced
+            # Terminal/API tarafında kapanmış bir kaydın eski ID'si bellekte
+            # kalmış olabilir. Grace kararından önce DB ile uzlaş.
+            self._sync(s)
             if not s.active_downtime_id and not s.is_in_grace:
                 self._start_grace(s)
 
@@ -211,6 +232,10 @@ class DowntimeMonitor:
                     s.cancel_grace()
                 # Aktif duruş varsa (türü ne olursa olsun) → kapat
                 if s.active_downtime_id:
+                    # Kayıt terminalden kapatılmış/değiştirilmiş olabilir.
+                    # Kapatmadan önce gerçek aktif ID'yi API'den tazele.
+                    self._sync(s)
+                if s.active_downtime_id:
                     logger.info(f"[{s.line_name}] Üretim ilerledi → duruş kapatılıyor")
                     self._auto_stop(s, "Üretim devam etti — otomatik")
             return
@@ -220,11 +245,12 @@ class DowntimeMonitor:
             if now - s.last_produced_ts >= self.stall_sec:
                 logger.warning(
                     f"[{s.line_name}] auto_cycle_on=True ama {self.stall_sec}sn üretim yok → STALL DURUŞU")
-                self._auto_start(
+                started = self._auto_start(
                     s, is_stall=True,
                     note=f"Otomatik — üretim durdu ({self.stall_sec}sn parça çıkmadı, auto_cycle_on açık)",
                     trigger="stall", started_at_ts=s.last_produced_ts)
-                self._start_inactivity(s)
+                if started:
+                    self._start_inactivity(s)
     def _start_grace(self, s: LineState):
         if s.active_downtime_id:
             logger.info("  Zaten aktif duruş var — grace atlanıyor")
@@ -243,10 +269,30 @@ class DowntimeMonitor:
                 and s.last_produced > s.produced_at_stop):
             logger.info(f"[{s.line_name}] Grace bitti ama üretim ilerlemiş — duruş açılmadı")
             return
+        # Grace sırasında terminal başka bir aktif duruş açmış olabilir.
+        self._sync(s)
+        if s.active_downtime_id:
+            logger.info(
+                f"[{s.line_name}] Grace doldu ancak DB'de aktif duruş var "
+                f"(ID={s.active_downtime_id}) — yeni kayıt açılmadı"
+            )
+            return
         logger.warning(f"[{s.line_name}] Grace doldu (üretim yok) → OTOMATİK DURUŞ")
         # started_at = gerçek duruş anı (stop_detected_at) → grace süresi (180sn) duruşa dahil
-        self._auto_start(s, trigger="grace", started_at_ts=s.stop_detected_at)
-        self._start_inactivity(s)
+        if self._auto_start(s, trigger="grace", started_at_ts=s.stop_detected_at):
+            self._start_inactivity(s)
+        elif s.auto_cycle_on is False and not s.active_downtime_id:
+            # Geçici API/DB hatasında aynı fiziksel duruşu kaybetme. Üretim
+            # başlarsa _handle_uretim bu timer'ı iptal eder.
+            retry_sec = min(30, max(5, self.grace_sec))
+            logger.warning(
+                f"[{s.line_name}] Otomatik duruş kaydedilemedi — "
+                f"{retry_sec}sn sonra yeniden denenecek"
+            )
+            s.is_in_grace = True
+            s.grace_timer = threading.Timer(retry_sec, self._grace_done, args=[s])
+            s.grace_timer.daemon = True
+            s.grace_timer.start()
 
     def _start_inactivity(self, s: LineState):
         s.cancel_inactivity()
@@ -275,19 +321,18 @@ class DowntimeMonitor:
     # ── API (v4 ile aynı) ──
     def _auto_start(self, s: LineState, reason_code: str = None, is_stall: bool = False,
                     note: str = None, trigger: str = None, started_at_ts: float = None):
-        import requests
         code = reason_code or self.PENDING
         rid = self._reason_ids.get(code)
         if not rid:
-            logger.error(f"'{code}' reason_id bulunamadı"); return
+            logger.error(f"'{code}' reason_id bulunamadı")
+            return False
         body = {"line_id": s.line_id, "reason_id": rid, "shift": shift_utils.detect_shift_code(),
                 "notes": note or f"Otomatik — {code}", "trigger": trigger}
         # Gerçek duruş anı verildiyse started_at olarak gönder (grace/stall geri tarihleme)
         if started_at_ts:
             body["started_at"] = datetime.fromtimestamp(started_at_ts, tz=timezone.utc).isoformat()
         try:
-            r = requests.post(f"{self.api_url}/api/v1/downtimes/start",
-                json=body, timeout=5)
+            r = self._request("POST", "/api/v1/downtimes/start", json=body)
             if r.status_code == 201:
                 d = r.json()
                 s.active_downtime_id = d["downtime_id"]
@@ -295,6 +340,7 @@ class DowntimeMonitor:
                 s.active_is_stall = is_stall
                 logger.info(f"[{s.line_name}] Duruş: ID={s.active_downtime_id} ({code})"
                             + (" [stall]" if is_stall else ""))
+                return True
             elif r.status_code == 409:
                 logger.warning(f"[{s.line_name}] Duruş açılamadı (409) — DB'de zaten açık duruş var, senkronize ediliyor")
                 self._sync(s)
@@ -304,65 +350,126 @@ class DowntimeMonitor:
                     logger.warning(f"[{s.line_name}] Önde bayat VARDIYA_SONU (ID={s.active_downtime_id}) — kapatılıp gerçek duruş açılıyor")
                     self._auto_stop(s, "Bayat vardiya sonu — yeni duruş öncesi otomatik kapatıldı")
                     if not s.active_downtime_id:   # kapatma başarılıysa tekrar dene
-                        self._auto_start(s, reason_code=code, is_stall=is_stall,
-                                         note=note, trigger=trigger, started_at_ts=started_at_ts)
+                        return self._auto_start(
+                            s,
+                            reason_code=code,
+                            is_stall=is_stall,
+                            note=note,
+                            trigger=trigger,
+                            started_at_ts=started_at_ts,
+                        )
+                return bool(s.active_downtime_id)
+            else:
+                logger.error(
+                    f"[{s.line_name}] Duruş açılamadı: HTTP {r.status_code} "
+                    f"{r.text[:200]}"
+                )
         except Exception as e:
-            logger.error(f"API start: {e}")
+            logger.error(f"[{s.line_name}] API start hatası: {e}")
+        return False
 
     def _auto_stop(self, s: LineState, note="Otomatik"):
-        import requests
         if not s.active_downtime_id:
             return
+        attempted_id = s.active_downtime_id
         try:
-            r = requests.post(f"{self.api_url}/api/v1/downtimes/{s.active_downtime_id}/stop",
-                json={"notes": note}, timeout=5)
+            r = self._request(
+                "POST",
+                f"/api/v1/downtimes/{attempted_id}/stop",
+                json={"notes": note},
+            )
             if r.status_code == 200:
-                logger.info(f"[{s.line_name}] Kapatıldı: ID={s.active_downtime_id}, {r.json().get('duration_text','?')}")
-                s.active_downtime_id = None; s.active_reason_code = None
-                s.active_is_stall = False; s.cancel_inactivity()
+                logger.info(f"[{s.line_name}] Kapatıldı: ID={attempted_id}, {r.json().get('duration_text','?')}")
+                self._clear_active_state(s)
+            elif r.status_code == 404:
+                logger.warning(
+                    f"[{s.line_name}] ID={attempted_id} API'de artık aktif değil "
+                    "(404) — state yeniden senkronize ediliyor"
+                )
+                self._sync(s)
             else:
-                logger.warning(f"[{s.line_name}] Duruş KAPATILAMADI: ID={s.active_downtime_id} "
+                logger.warning(f"[{s.line_name}] Duruş KAPATILAMADI: ID={attempted_id} "
                                f"HTTP {r.status_code} {r.text[:200]} — state korunuyor, tekrar denenecek")
         except Exception as e:
             logger.error(f"[{s.line_name}] API stop hatası: {e} — state korunuyor")
 
     def _update_reason_api(self, s: LineState, code: str):
-        import requests
         rid = self._reason_ids.get(code)
         if not rid or not s.active_downtime_id:
             return
         try:
-            requests.patch(f"{self.api_url}/api/v1/downtimes/{s.active_downtime_id}/reason",
-                params={"reason_id": rid}, timeout=5)
-            s.active_reason_code = code
-        except Exception:
-            pass
+            r = self._request(
+                "PATCH",
+                f"/api/v1/downtimes/{s.active_downtime_id}/reason",
+                params={"reason_id": rid},
+            )
+            if r.status_code == 200:
+                s.active_reason_code = code
+            elif r.status_code == 404:
+                logger.warning(f"[{s.line_name}] Sebep güncellenecek duruş bulunamadı — senkronize ediliyor")
+                self._sync(s)
+            else:
+                logger.warning(
+                    f"[{s.line_name}] Sebep güncellenemedi: HTTP {r.status_code} "
+                    f"{r.text[:200]}"
+                )
+        except Exception as e:
+            logger.error(f"[{s.line_name}] API reason hatası: {e}")
 
     def _sync(self, s: LineState):
-        import requests
         try:
-            r = requests.get(f"{self.api_url}/api/v1/downtimes/active/{s.line_id}", timeout=5)
+            r = self._request("GET", f"/api/v1/downtimes/active/{s.line_id}")
             if r.status_code == 200:
                 d = r.json()
                 if d and d.get("downtime_id"):
+                    old_id = s.active_downtime_id
+                    old_reason = s.active_reason_code
                     s.active_downtime_id = d["downtime_id"]
                     s.active_reason_code = d.get("reason_code", "")
-        except Exception:
-            pass
+                    s.cancel_grace()
+                    if old_id != s.active_downtime_id:
+                        logger.info(
+                            f"[{s.line_name}] Aktif duruş senkronize edildi: "
+                            f"{old_id} → {s.active_downtime_id}"
+                        )
+                    if old_reason != s.active_reason_code:
+                        logger.info(
+                            f"[{s.line_name}] Sebep: {old_reason} → "
+                            f"{s.active_reason_code}"
+                        )
+                    if s.active_reason_code != self.PENDING:
+                        s.cancel_inactivity()
+                    elif old_id != s.active_downtime_id:
+                        self._start_inactivity(s)
+                else:
+                    if s.active_downtime_id:
+                        logger.warning(
+                            f"[{s.line_name}] Bayat yerel duruş state'i temizlendi: "
+                            f"ID={s.active_downtime_id}"
+                        )
+                    self._clear_active_state(s)
+                return True
+            logger.warning(
+                f"[{s.line_name}] Aktif duruş senkronizasyonu başarısız: "
+                f"HTTP {r.status_code} {r.text[:200]}"
+            )
+        except Exception as e:
+            logger.error(f"[{s.line_name}] API sync hatası: {e}")
+        return False
 
     def _fetch_reasons(self):
-        import requests
         try:
-            r = requests.get(f"{self.api_url}/api/v1/downtimes/reasons", timeout=5)
+            r = self._request("GET", "/api/v1/downtimes/reasons")
             if r.status_code == 200:
                 for x in r.json():
                     self._reason_ids[x["reason_code"]] = x["reason_id"]
+            else:
+                logger.warning(f"Sebepler alınamadı: HTTP {r.status_code} {r.text[:200]}")
         except Exception as e:
             logger.error(f"Sebepler: {e}")
 
     # Periyodik sebep sync (operatör terminalden sebep girince yakala)
     def _reason_check_loop(self):
-        import requests
         while self._running:
             time.sleep(30)
             # Açılışta API hazır değilse sebepler boş kalmış olabilir → tekrar dene
@@ -370,20 +477,9 @@ class DowntimeMonitor:
                 logger.warning("reason_ids boş — sebepler yeniden çekiliyor")
                 self._fetch_reasons()
             for s in self.lines.values():
-                if not s.active_downtime_id:
-                    continue
-                try:
-                    r = requests.get(f"{self.api_url}/api/v1/downtimes/active/{s.line_id}", timeout=5)
-                    if r.status_code == 200:
-                        d = r.json()
-                        if d and d.get("reason_code") != s.active_reason_code:
-                            old = s.active_reason_code
-                            s.active_reason_code = d["reason_code"]
-                            logger.info(f"[{s.line_name}] Sebep: {old} → {s.active_reason_code}")
-                            if s.active_reason_code != self.PENDING:
-                                s.cancel_inactivity()
-                except Exception:
-                    pass
+                # Sadece bellekte aktif görünenleri değil, tüm izlenen hatları
+                # uzlaştır: terminalden açma/kapama ve bayat ID'ler yakalanır.
+                self._sync(s)
 
     # ── START / STOP ──
     def start(self):
@@ -419,19 +515,49 @@ class DowntimeMonitor:
             s.cancel_inactivity()
         self.client.loop_stop()
         self.client.disconnect()
+        self._http.close()
 
 
 if __name__ == "__main__":
-    import os
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
     from line_utils import load_lines_config
     lines = load_lines_config(os.environ["DB_URL"])
     if not lines:
         raise SystemExit("production_lines'ta aktif hat yok")
 
+    monitored_raw = os.getenv("MONITORED_LINE_IDS", "").strip()
+    if monitored_raw:
+        try:
+            monitored_ids = {
+                int(value.strip())
+                for value in monitored_raw.split(",")
+                if value.strip()
+            }
+        except ValueError as exc:
+            raise SystemExit(
+                "MONITORED_LINE_IDS virgülle ayrılmış sayılardan oluşmalı"
+            ) from exc
+
+        known_ids = {int(line["line_id"]) for line in lines}
+        missing_ids = monitored_ids - known_ids
+        if missing_ids:
+            raise SystemExit(
+                f"MONITORED_LINE_IDS içinde tanımsız/pasif hat var: "
+                f"{sorted(missing_ids)}"
+            )
+        lines = [line for line in lines if int(line["line_id"]) in monitored_ids]
+        if not lines:
+            raise SystemExit("MONITORED_LINE_IDS sonrasında izlenecek hat kalmadı")
+
+    logger.info(
+        "Otomatik duruş izlenen hatlar: %s",
+        ", ".join(f"{line['line_id']}:{line['line_name']}" for line in lines),
+    )
+
     m = DowntimeMonitor(
         api_base_url=os.getenv("API_URL", "http://127.0.0.1:8000"),
         mqtt_host=os.getenv("MQTT_HOST", "127.0.0.1"),
+        mqtt_port=int(os.getenv("MQTT_PORT", "1883")),
         grace_sec=int(os.getenv("GRACE_PERIOD", "30")),
         shift_end_min=float(os.getenv("SHIFT_END_TIMEOUT", "60")),
         stall_sec=int(os.getenv("STALL_TIMEOUT", "180")),
