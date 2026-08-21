@@ -13,7 +13,11 @@ DEĞİŞİKLİK (v4 → v5):
 
   KORUNAN:
          - EMPTY_LINE (DB3.DBX0.7, 'komut' topic) → anında BOSALTMA duruşu
-         - 60dk sessizlik + sebep BELİRLENMEDİ → VARDIYA_SONU
+
+  VARDİYA SONU:
+         - Aktif duruş, sebebi ne olursa olsun shift_config/shift_overrides
+           tarafından belirlenen kesin end_hour anında kapatılır.
+         - Sebep değiştirilmez; BELIRLENMEDI ise sonradan düzeltilebilir.
 
 Neden state-based?
   start_cycle / stop_cycle / end_cycle yükselen-kenar sinyalleriydi; PLC veya
@@ -67,9 +71,12 @@ class LineState:
         # ── Duruş ──
         self.active_downtime_id: Optional[int] = None
         self.active_reason_code: Optional[str] = None
+        self.active_shift: Optional[str] = None
+        self.active_started_at: Optional[datetime] = None
         self.grace_timer: Optional[threading.Timer] = None
         self.is_in_grace = False
-        self.inactivity_timer: Optional[threading.Timer] = None
+        self.shift_end_timer: Optional[threading.Timer] = None
+        self.scheduled_shift_end: Optional[datetime] = None
 
     def cancel_grace(self):
         if self.grace_timer and self.grace_timer.is_alive():
@@ -77,10 +84,11 @@ class LineState:
         self.grace_timer = None
         self.is_in_grace = False
 
-    def cancel_inactivity(self):
-        if self.inactivity_timer and self.inactivity_timer.is_alive():
-            self.inactivity_timer.cancel()
-        self.inactivity_timer = None
+    def cancel_shift_end(self):
+        if self.shift_end_timer and self.shift_end_timer.is_alive():
+            self.shift_end_timer.cancel()
+        self.shift_end_timer = None
+        self.scheduled_shift_end = None
 
 
 class DowntimeMonitor:
@@ -94,6 +102,8 @@ class DowntimeMonitor:
         self.mqtt_host = mqtt_host
         self.mqtt_port = mqtt_port
         self.grace_sec = grace_sec
+        # Geriye uyumluluk için parametre kabul edilir; kapanış artık sabit
+        # timeout ile değil DB'deki end_hour ile yapılır.
         self.shift_end_sec = shift_end_min * 60
         self.stall_sec = stall_sec     # auto_cycle_on açıkken üretim olmadan geçen sınır
 
@@ -127,8 +137,10 @@ class DowntimeMonitor:
         """API'de aktif kayıt kalmadığında yerel duruş state'ini temizle."""
         s.active_downtime_id = None
         s.active_reason_code = None
+        s.active_shift = None
+        s.active_started_at = None
         s.active_is_stall = False
-        s.cancel_inactivity()
+        s.cancel_shift_end()
 
     # ── MQTT ──
     def _on_connect(self, client, userdata, flags, rc, properties=None):
@@ -150,6 +162,15 @@ class DowntimeMonitor:
     def _on_message(self, client, userdata, msg):
         try:
             payload = json.loads(msg.payload.decode())
+            if msg.topic == "fabrika/config":
+                shift_utils.invalidate()
+                logger.info("Global config reload — vardiya cache tazelenecek")
+                threading.Thread(
+                    target=self._reload_shift_schedules,
+                    daemon=True,
+                ).start()
+                return
+
             parts = msg.topic.rsplit("/", 1)
             if len(parts) != 2:
                 return
@@ -167,6 +188,7 @@ class DowntimeMonitor:
             elif sig == "config":
                 shift_utils.invalidate()
                 logger.info(f"[{state.line_name}] config reload — vardiya cache tazelendi")
+                self._reload_shift_schedules()
         except json.JSONDecodeError:
             pass
         except Exception as e:
@@ -250,7 +272,7 @@ class DowntimeMonitor:
                     note=f"Otomatik — üretim durdu ({self.stall_sec}sn parça çıkmadı, auto_cycle_on açık)",
                     trigger="stall", started_at_ts=s.last_produced_ts)
                 if started:
-                    self._start_inactivity(s)
+                    self._schedule_shift_end(s)
     def _start_grace(self, s: LineState):
         if s.active_downtime_id:
             logger.info("  Zaten aktif duruş var — grace atlanıyor")
@@ -280,7 +302,7 @@ class DowntimeMonitor:
         logger.warning(f"[{s.line_name}] Grace doldu (üretim yok) → OTOMATİK DURUŞ")
         # started_at = gerçek duruş anı (stop_detected_at) → grace süresi (180sn) duruşa dahil
         if self._auto_start(s, trigger="grace", started_at_ts=s.stop_detected_at):
-            self._start_inactivity(s)
+            self._schedule_shift_end(s)
         elif s.auto_cycle_on is False and not s.active_downtime_id:
             # Geçici API/DB hatasında aynı fiziksel duruşu kaybetme. Üretim
             # başlarsa _handle_uretim bu timer'ı iptal eder.
@@ -294,29 +316,110 @@ class DowntimeMonitor:
             s.grace_timer.daemon = True
             s.grace_timer.start()
 
-    def _start_inactivity(self, s: LineState):
-        s.cancel_inactivity()
-        s.inactivity_timer = threading.Timer(self.shift_end_sec, self._inactivity_done, args=[s])
-        s.inactivity_timer.daemon = True
-        s.inactivity_timer.start()
+    @staticmethod
+    def _parse_api_datetime(value) -> Optional[datetime]:
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            parsed = value
+        else:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
 
-    def _inactivity_done(self, s: LineState):
-        if not s.active_downtime_id or s.auto_cycle_on:
+    def _resolved_shift_end(self, s: LineState) -> Optional[datetime]:
+        """Aktif kaydın hat+tarih kapsamına göre DB bitşini çöz."""
+        if not s.active_downtime_id or not s.active_started_at:
+            return None
+
+        local_started = s.active_started_at.astimezone()
+        shift_code = s.active_shift or shift_utils.detect_shift_code(
+            local_started,
+            line_id=s.line_id,
+        )
+        shift = shift_utils.shift_by_code(
+            shift_code,
+            line_id=s.line_id,
+            dt=local_started,
+        )
+        shift_date = shift_utils.shift_date_for_datetime(shift, local_started)
+        return shift_utils.shift_end_datetime(
+            shift,
+            shift_date,
+            tzinfo=local_started.tzinfo,
+        )
+
+    def _schedule_shift_end(self, s: LineState):
+        """Aynı hedef için tek timer tut; admin değişikliğinde yenile."""
+        end_at = self._resolved_shift_end(s)
+        if end_at is None:
+            s.cancel_shift_end()
             return
-        if s.active_reason_code and s.active_reason_code != self.PENDING:
-            logger.info(f"[{s.line_name}] İnaktif ama sebep var ({s.active_reason_code}) — kapatılmıyor")
+
+        if (
+            s.shift_end_timer
+            and s.shift_end_timer.is_alive()
+            and s.scheduled_shift_end == end_at
+        ):
             return
-        # ── Sadece GERÇEK vardiya bitişine yakınsa VARDIYA_SONU yap ──
-        # Vardiya bitiş saati tek kaynaktan (shift_config.end_hour).
-        h = datetime.now().hour
-        sh = shift_utils.shift_by_code(shift_utils.detect_shift_code())
-        end_h = sh["end_hour"] % 24
-        if h < end_h:
-            logger.info(f"[{s.line_name}] 60dk sessizlik ama vardiya ortası (saat {h}/{end_h}) — duruş açık tutuluyor")
-            self._start_inactivity(s)   # bir sonraki 60dk penceresinde tekrar bak
+
+        s.cancel_shift_end()
+        expected_id = s.active_downtime_id
+        now = datetime.now().astimezone()
+        delay = max(0.0, (end_at - now).total_seconds())
+        s.scheduled_shift_end = end_at
+        s.shift_end_timer = threading.Timer(
+            delay,
+            self._shift_end_done,
+            args=[s, expected_id, end_at],
+        )
+        s.shift_end_timer.daemon = True
+        s.shift_end_timer.start()
+        logger.info(
+            f"[{s.line_name}] Duruş ID={expected_id} vardiya sonuna planlandı: "
+            f"{end_at.isoformat()}"
+        )
+
+    def _shift_end_done(
+        self,
+        s: LineState,
+        expected_id: int,
+        expected_end: datetime,
+    ):
+        # Terminal kaydı kapatmış/değiştirmiş olabilir.
+        self._sync(s)
+        if s.active_downtime_id != expected_id:
             return
-        self._update_reason_api(s, self.SHIFT_END)
-        self._auto_stop(s, "Vardiya sonu — otomatik")
+
+        # Admin, timer kurulduktan sonra bitiş saatini değiştirmiş olabilir.
+        current_end = self._resolved_shift_end(s)
+        now = datetime.now().astimezone()
+        if current_end is None:
+            return
+        if current_end != expected_end or current_end > now:
+            self._schedule_shift_end(s)
+            return
+
+        logger.info(
+            f"[{s.line_name}] Vardiya sonu geldi — ID={expected_id} "
+            f"sebep korunarak kapatılıyor ({s.active_reason_code})"
+        )
+        self._auto_stop(
+            s,
+            "Vardiya sonu — mevcut sebep korunarak otomatik kapatıldı",
+            ended_at=current_end,
+        )
+
+    def _reload_shift_schedules(self):
+        """MQTT reload veya periyodik uzlaşma sonrası timer'ları yenile."""
+        try:
+            shift_utils.get_shifts(force=True)
+        except Exception as exc:
+            logger.warning(f"Vardiya ayarları yenilenemedi: {exc}")
+        for state in self.lines.values():
+            if self._sync(state):
+                self._schedule_shift_end(state)
 
     # ── API (v4 ile aynı) ──
     def _auto_start(self, s: LineState, reason_code: str = None, is_stall: bool = False,
@@ -326,7 +429,13 @@ class DowntimeMonitor:
         if not rid:
             logger.error(f"'{code}' reason_id bulunamadı")
             return False
-        body = {"line_id": s.line_id, "reason_id": rid, "shift": shift_utils.detect_shift_code(),
+        detected_at = (
+            datetime.fromtimestamp(started_at_ts).astimezone()
+            if started_at_ts
+            else datetime.now().astimezone()
+        )
+        shift_code = shift_utils.detect_shift_code(detected_at, line_id=s.line_id)
+        body = {"line_id": s.line_id, "reason_id": rid, "shift": shift_code,
                 "notes": note or f"Otomatik — {code}", "trigger": trigger}
         # Gerçek duruş anı verildiyse started_at olarak gönder (grace/stall geri tarihleme)
         if started_at_ts:
@@ -337,7 +446,10 @@ class DowntimeMonitor:
                 d = r.json()
                 s.active_downtime_id = d["downtime_id"]
                 s.active_reason_code = code
+                s.active_shift = shift_code
+                s.active_started_at = self._parse_api_datetime(d.get("started_at"))
                 s.active_is_stall = is_stall
+                self._schedule_shift_end(s)
                 logger.info(f"[{s.line_name}] Duruş: ID={s.active_downtime_id} ({code})"
                             + (" [stall]" if is_stall else ""))
                 return True
@@ -368,15 +480,18 @@ class DowntimeMonitor:
             logger.error(f"[{s.line_name}] API start hatası: {e}")
         return False
 
-    def _auto_stop(self, s: LineState, note="Otomatik"):
+    def _auto_stop(self, s: LineState, note="Otomatik", ended_at: datetime = None):
         if not s.active_downtime_id:
             return
         attempted_id = s.active_downtime_id
         try:
+            body = {"notes": note}
+            if ended_at is not None:
+                body["ended_at"] = ended_at.isoformat()
             r = self._request(
                 "POST",
                 f"/api/v1/downtimes/{attempted_id}/stop",
-                json={"notes": note},
+                json=body,
             )
             if r.status_code == 200:
                 logger.info(f"[{s.line_name}] Kapatıldı: ID={attempted_id}, {r.json().get('duration_text','?')}")
@@ -426,6 +541,8 @@ class DowntimeMonitor:
                     old_reason = s.active_reason_code
                     s.active_downtime_id = d["downtime_id"]
                     s.active_reason_code = d.get("reason_code", "")
+                    s.active_shift = d.get("shift")
+                    s.active_started_at = self._parse_api_datetime(d.get("started_at"))
                     s.cancel_grace()
                     if old_id != s.active_downtime_id:
                         logger.info(
@@ -437,10 +554,7 @@ class DowntimeMonitor:
                             f"[{s.line_name}] Sebep: {old_reason} → "
                             f"{s.active_reason_code}"
                         )
-                    if s.active_reason_code != self.PENDING:
-                        s.cancel_inactivity()
-                    elif old_id != s.active_downtime_id:
-                        self._start_inactivity(s)
+                    self._schedule_shift_end(s)
                 else:
                     if s.active_downtime_id:
                         logger.warning(
@@ -484,7 +598,10 @@ class DowntimeMonitor:
     # ── START / STOP ──
     def start(self):
         self._running = True
-        logger.info(f"Monitor v5 (auto_cycle_on) — Grace:{self.grace_sec}sn, Shift-end:{self.shift_end_sec/60:.0f}dk")
+        logger.info(
+            f"Monitor v5 (auto_cycle_on) — Grace:{self.grace_sec}sn, "
+            "Shift-end:DB vardiya ayarı"
+        )
 
         self.client.connect(self.mqtt_host, self.mqtt_port, 60)
         self.client.loop_start()
@@ -503,8 +620,7 @@ class DowntimeMonitor:
             self._sync(s)
             if s.active_downtime_id:
                 logger.info(f"[{s.line_name}] Mevcut: ID={s.active_downtime_id} ({s.active_reason_code})")
-                if s.active_reason_code == self.PENDING:
-                    self._start_inactivity(s)
+                self._schedule_shift_end(s)
 
         threading.Thread(target=self._reason_check_loop, daemon=True).start()
 
@@ -512,7 +628,7 @@ class DowntimeMonitor:
         self._running = False
         for s in self.lines.values():
             s.cancel_grace()
-            s.cancel_inactivity()
+            s.cancel_shift_end()
         self.client.loop_stop()
         self.client.disconnect()
         self._http.close()

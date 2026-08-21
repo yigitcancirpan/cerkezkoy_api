@@ -199,9 +199,9 @@
       <h2>Vardiya Tanımları</h2>
       <button class="btn" onclick="openShift(null)">+ Yeni Vardiya</button>
     </div>
-    <p class="hint">Saat değişiklikleri <strong>anında</strong> yürürlüğe girer (servis yeniden başlatma gerekmez). <strong>Planlanan süre = vardiyanın brüt süresidir; molayı çıkarmayın</strong> — mola, OEE'den hariç işaretli duruşlardan otomatik düşülür. Vardiya ortasında değişiklik yaparsan o <strong>günün tamamı</strong> yeni süreye göre hesaplanır.</p>
+    <p class="hint">Saat değişiklikleri <strong>anında</strong> yürürlüğe girer (servis yeniden başlatma gerekmez). <strong>Genel</strong> satır normal günlerde, güne özel satır (ör. Cumartesi) o gün kullanılır. Aktif duruşlar seçilen satırın bitiş saatinde, mevcut sebepleri korunarak kapanır. <strong>Planlanan süre = vardiyanın brüt süresidir; molayı çıkarmayın.</strong></p>
     <table><thead><tr>
-      <th>Vardiya</th><th>Kod</th><th>Saat</th><th>Özet Saati</th><th>Planlanan</th><th>Durum</th><th></th>
+      <th>Vardiya</th><th>Kod</th><th>Uygulandığı Gün</th><th>Saat</th><th>Özet Saati</th><th>Planlanan</th><th>Durum</th><th></th>
     </tr></thead><tbody id="shift-rows"></tbody></table>
   </div>
   <!-- ── AYARLAR ── -->
@@ -271,6 +271,8 @@
   <div class="modal">
     <h3 id="shift-title">Vardiya</h3>
     <input type="hidden" id="s-orig-code">
+    <input type="hidden" id="s-orig-day">
+    <input type="hidden" id="s-line-id">
     <div class="grid2">
       <div class="field"><label>Görünen Ad</label><input id="s-label" placeholder="1. Vardiya"></div>
       <div class="field"><label>Kod</label><input id="s-code" class="code" placeholder="vardiya_1"></div>
@@ -278,6 +280,15 @@
     <div class="grid2">
       <div class="field"><label>Başlangıç saati (0-23)</label><input type="number" id="s-start" min="0" max="23"></div>
       <div class="field"><label>Bitiş saati (1-24)</label><input type="number" id="s-end" min="1" max="24"></div>
+    </div>
+    <div class="field"><label>Uygulandığı gün</label>
+      <select id="s-day">
+        <option value="">Genel (güne özel kural yoksa)</option>
+        <option value="1">Pazartesi</option><option value="2">Salı</option>
+        <option value="3">Çarşamba</option><option value="4">Perşembe</option>
+        <option value="5">Cuma</option><option value="6">Cumartesi</option>
+        <option value="0">Pazar</option>
+      </select>
     </div>
     <div class="grid2">
       <div class="field"><label>Özet yazma saati</label><input type="number" id="s-latest" min="0" max="24"></div>
@@ -856,23 +867,36 @@ async function deactivatePress(id){
   catch(e){ toast(e.message, false); }
 }
 // ── VARDİYALAR ──
+const SHIFT_DAYS = {
+  0:'Pazar', 1:'Pazartesi', 2:'Salı', 3:'Çarşamba',
+  4:'Perşembe', 5:'Cuma', 6:'Cumartesi'
+};
+
+function shiftScopeQuery(s){
+  const line = s.line_id == null ? -1 : s.line_id;
+  const day = s.day_of_week == null ? -1 : s.day_of_week;
+  return new URLSearchParams({scope_line_id:String(line), scope_day_of_week:String(day)}).toString();
+}
+
 async function loadShifts(){
   const rows = await api('GET', '/api/v1/settings/shifts');
   const tbody = document.getElementById('shift-rows');
-  if(!rows.length){ tbody.innerHTML = '<tr><td colspan="7" class="hint">Vardiya tanımı yok.</td></tr>'; return; }
+  if(!rows.length){ tbody.innerHTML = '<tr><td colspan="8" class="hint">Vardiya tanımı yok.</td></tr>'; return; }
   tbody.innerHTML = rows.map(s=>{
     const hrs = (s.planned_seconds/3600);
     const hrsTxt = Number.isInteger(hrs) ? hrs : hrs.toFixed(2);
+    const dayLabel = s.day_of_week == null ? 'Genel' : SHIFT_DAYS[s.day_of_week];
     return `<tr>
       <td><strong>${esc(s.label)}</strong></td>
       <td class="code">${esc(s.code)}</td>
+      <td>${esc(dayLabel)}${s.line_id == null ? '' : ` / Hat ${s.line_id}`}</td>
       <td>${String(s.start_hour).padStart(2,'0')}:00 – ${String(s.end_hour%24).padStart(2,'0')}:00</td>
       <td>${String(s.latest_end%24).padStart(2,'0')}:00</td>
       <td>${hrsTxt} saat</td>
       <td><span class="pill ${s.is_active?'on':'off'}">${s.is_active?'Aktif':'Pasif'}</span></td>
       <td style="text-align:right; white-space:nowrap">
         <button class="btn ghost sm" onclick='openShift(${JSON.stringify(s)})'>Düzenle</button>
-        <button class="btn danger sm" onclick="delShift('${esc(s.code)}')">Sil</button>
+        <button class="btn danger sm" onclick='delShift(${JSON.stringify(s)})'>Sil</button>
       </td>
     </tr>`;
   }).join('');
@@ -883,6 +907,8 @@ function openShift(s){
   const codeInp = document.getElementById('s-code');
   if(s){
     document.getElementById('s-orig-code').value = s.code;
+    document.getElementById('s-orig-day').value = s.day_of_week == null ? '' : s.day_of_week;
+    document.getElementById('s-line-id').value = s.line_id == null ? '' : s.line_id;
     document.getElementById('s-label').value = s.label;
     codeInp.value = s.code; codeInp.readOnly = true;
     document.getElementById('s-start').value = s.start_hour;
@@ -891,8 +917,11 @@ function openShift(s){
     document.getElementById('s-order').value = s.display_order;
     document.getElementById('s-hours').value = (s.planned_seconds/3600);
     document.getElementById('s-active').value = String(s.is_active);
+    document.getElementById('s-day').value = s.day_of_week == null ? '' : String(s.day_of_week);
   }else{
     document.getElementById('s-orig-code').value = '';
+    document.getElementById('s-orig-day').value = '';
+    document.getElementById('s-line-id').value = '';
     document.getElementById('s-label').value = '';
     codeInp.value = ''; codeInp.readOnly = false;
     document.getElementById('s-start').value = 8;
@@ -901,37 +930,62 @@ function openShift(s){
     document.getElementById('s-order').value = 1;
     document.getElementById('s-hours').value = 10;
     document.getElementById('s-active').value = 'true';
+    document.getElementById('s-day').value = '';
   }
   document.getElementById('shift-modal').classList.add('show');
 }
 
 async function saveShift(){
+  const originalCode = document.getElementById('s-orig-code').value;
+  const originalDayRaw = document.getElementById('s-orig-day').value;
+  const lineRaw = document.getElementById('s-line-id').value;
   const code = document.getElementById('s-code').value.trim();
   const label = document.getElementById('s-label').value.trim();
   const hours = parseFloat(document.getElementById('s-hours').value);
+  const startHour = parseInt(document.getElementById('s-start').value);
+  const endHour = parseInt(document.getElementById('s-end').value);
+  const latestHour = parseInt(document.getElementById('s-latest').value);
   if(!code || !label) return toast('Kod ve ad gerekli', false);
   if(!hours || hours <= 0) return toast('Planlanan süre 0\'dan büyük olmalı', false);
+  const endOffset = endHour > startHour ? endHour : endHour + 24;
+  const latestOffset = latestHour > startHour ? latestHour : latestHour + 24;
+  if(latestOffset < endOffset) return toast('Özet saati vardiya bitişinden önce olamaz', false);
   const body = {
     code,
     label,
-    start_hour: parseInt(document.getElementById('s-start').value),
-    end_hour: parseInt(document.getElementById('s-end').value),
-    latest_end: parseInt(document.getElementById('s-latest').value),
-    window_hours: Math.round(parseInt(document.getElementById('s-end').value) - parseInt(document.getElementById('s-start').value)) || 0,
+    start_hour: startHour,
+    end_hour: endHour,
+    latest_end: latestHour,
+    window_hours: endOffset - startHour,
     planned_seconds: Math.round(hours * 3600),
     display_order: parseInt(document.getElementById('s-order').value) || 1,
     is_active: document.getElementById('s-active').value === 'true',
+    line_id: lineRaw === '' ? null : parseInt(lineRaw),
+    day_of_week: document.getElementById('s-day').value === ''
+      ? null : parseInt(document.getElementById('s-day').value),
   };
-  if(body.window_hours <= 0) body.window_hours += 24;   // gece yarısını geçen vardiya
   try{
-    await api('PUT', `/api/v1/settings/shifts/${encodeURIComponent(code)}`, body);
+    if(originalCode){
+      const original = {
+        line_id: lineRaw === '' ? null : parseInt(lineRaw),
+        day_of_week: originalDayRaw === '' ? null : parseInt(originalDayRaw),
+      };
+      await api(
+        'PUT',
+        `/api/v1/settings/shifts/${encodeURIComponent(originalCode)}?${shiftScopeQuery(original)}`,
+        body
+      );
+    }else{
+      await api('POST', '/api/v1/settings/shifts', body);
+    }
     closeModal('shift-modal'); toast('Vardiya kaydedildi — anında yürürlükte'); loadShifts();
   }catch(e){ toast(e.message, false); }
 }
 
-async function delShift(code){
-  if(!confirm(`'${code}' vardiyası silinsin mi?`)) return;
-  try{ await api('DELETE', `/api/v1/settings/shifts/${encodeURIComponent(code)}`); toast('Silindi'); loadShifts(); }
+async function delShift(s){
+  const scope = s.day_of_week == null ? 'Genel' : SHIFT_DAYS[s.day_of_week];
+  if(!confirm(`'${s.code}' / ${scope} vardiyası silinsin mi?`)) return;
+  try{ await api('DELETE', `/api/v1/settings/shifts/${encodeURIComponent(s.code)}?${shiftScopeQuery(s)}`); toast('Silindi'); loadShifts(); }
   catch(e){ toast(e.message, false); }
 }
 // ── AYARLAR ──

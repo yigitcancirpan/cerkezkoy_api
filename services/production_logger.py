@@ -143,7 +143,7 @@ class ProductionLogger:
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
             """, (line_id, s.lot_number, s.model_id, s.target, s.produced,
                   s.scrap, s.good, s.actual_cycle, s.average_cycle,
-                  shift_utils.detect_shift_code()))
+                  shift_utils.detect_shift_code(line_id=line_id)))
             cur.close()
         except Exception as e:
             logger.error(f"log write: {e}"); self._db_conn = None
@@ -154,6 +154,24 @@ class ProductionLogger:
             db = self._get_db()
             cur = db.cursor(cursor_factory=RealDictCursor)
             d = shift_date or date.today()
+
+            # Vardiya sonunda downtime_monitor kesin end_hour ile kapatır. Servis
+            # yeniden başlatma yarışında aktif kayıt henüz kapanmadıysa yanlış
+            # bir özet yazmak yerine sonraki 30 saniyelik turu bekle.
+            cur.execute("""
+                SELECT 1
+                FROM downtimes
+                WHERE line_id=%s AND shift=%s AND started_at::date=%s
+                  AND is_active=TRUE
+                LIMIT 1
+            """, (line_id, shift_code, d))
+            if cur.fetchone():
+                logger.info(
+                    f"[Hat {line_id}] {shift_code} {d} — aktif duruş var, "
+                    "özet ertelendi"
+                )
+                cur.close()
+                return
 
             # ⚠️ KRİTİK: shift_produced = vardiya boyunca SAYILAN üretim
             # (max - min), MAX değil. Aksi takdirde önceki vardiyaların birikmiş
@@ -282,6 +300,10 @@ class ProductionLogger:
     def _on_message(self, client, userdata, msg):
         try:
             payload = json.loads(msg.payload.decode())
+            if msg.topic == "fabrika/config":
+                shift_utils.invalidate()
+                logger.info("Global config reload — vardiya cache tazelendi")
+                return
             parts = msg.topic.rsplit("/", 1)
             if len(parts) != 2: return
             prefix, signal = parts
@@ -306,7 +328,7 @@ class ProductionLogger:
 
                 # Vardiya/gün değişimi tespiti
                 now = datetime.now().astimezone()
-                current_shift = shift_utils.detect_shift_code()
+                current_shift = shift_utils.detect_shift_code(now, line_id=line_id)
                 today = now.strftime("%Y-%m-%d")
                 shift_key = f"{today}_{current_shift}"
 
@@ -398,63 +420,31 @@ class ProductionLogger:
             try:
                 now = datetime.now().astimezone()
                 
-                for shift in shift_utils.get_shifts():
-                    shift_code = shift["code"]
-                    
-                    # Bu vardiyanın hangi tarihe ait olduğunu ve bitip bitmediğini hesapla
-                    shift_date = self._resolve_shift_date(shift, now)
-                    if shift_date is None:
-                        continue  # Henüz bitmemiş
-                    
-                    # Her hat için DB'den kontrol et + gerekirse yaz
-                    for line_id in self.lines:
-                        if self._summary_exists(line_id, shift_date, shift_code):
-                            continue
-                        logger.info(
-                            f"═══ Vardiya özeti tetiklendi: Hat {line_id} | "
-                            f"{shift_code} | {shift_date} ═══"
-                        )
-                        self._write_shift_summary(line_id, shift_code, shift_date)
+                # Hat + tarih kapsamı shift_utils tarafından çözülür. Böylece
+                # cumartesi veya hat-bazlı admin ayarı genel satıra karışmaz.
+                for line_id in self.lines:
+                    for shift_date in (now.date(), now.date() - timedelta(days=1)):
+                        for shift in shift_utils.get_shifts(line_id=line_id, dt=shift_date):
+                            summary_at = shift_utils.shift_summary_datetime(
+                                shift,
+                                shift_date,
+                                now.tzinfo,
+                            )
+                            if now < summary_at:
+                                continue
+                            shift_code = shift["code"]
+                            if self._summary_exists(line_id, shift_date, shift_code):
+                                continue
+                            logger.info(
+                                f"═══ Vardiya özeti tetiklendi: Hat {line_id} | "
+                                f"{shift_code} | {shift_date} ═══"
+                            )
+                            self._write_shift_summary(line_id, shift_code, shift_date)
                         
             except Exception as e:
                 logger.error(f"scheduler loop: {e}")
             
             time.sleep(30)
-
-
-    def _resolve_shift_date(self, shift, now):
-        """
-        Vardiya şu an itibariyle bitmiş mi?
-        Bittiyse hangi shift_date'e ait olduğunu döner, bitmediyse None.
-        
-        Örnek: vardiya_2 latest_end=1 (gece 01:00) ise:
-        - Saat 02:00'da → bir önceki günün vardiya_2'si bitmiş
-        - Saat 23:00'da → vardiya henüz bitmedi (None)
-        """
-        latest_end = shift["latest_end"]  # 0-23 arası int
-        start_hour = shift["start_hour"]
-        current_hour = now.hour
-        
-        # Vardiya gece yarısını geçiyor mu? (örn. 19→01)
-        crosses_midnight = latest_end <= start_hour
-        
-        if not crosses_midnight:
-            # Normal vardiya (örn. 07→19): bugün başlamış, bugün biter
-            if current_hour >= latest_end:
-                return now.date()
-            return None
-        else:
-            # Gece vardiyası (örn. 19→01)
-            if current_hour < latest_end:
-                # Saat 00:30 gibi — dünkü vardiya yeni bitti
-                return (now - timedelta(days=1)).date()
-            elif current_hour >= start_hour:
-                # Vardiya başladı ama henüz bitmedi
-                return None
-            else:
-                # Saat 14:00 gibi — dünkü vardiya zaten çoktan bitti
-                return (now - timedelta(days=1)).date()
-
 
     def _summary_exists(self, line_id, shift_date, shift_code):
         """shift_summary tablosunda bu kayıt var mı?"""
@@ -478,8 +468,7 @@ class ProductionLogger:
     def _catch_up_missing_summaries(self, days_back=2):
         """
         Servis başlangıcında: son N günün eksik vardiya özetlerini yaz.
-        Bugünün henüz bitmemiş vardiyaları için _resolve_shift_date None döner,
-        o yüzden onlar zaten atlanır.
+        Bugünün henüz latest_end anı gelmemiş vardiyaları atlanır.
         """
         now = datetime.now().astimezone()
         today = now.date()
@@ -487,17 +476,20 @@ class ProductionLogger:
         for day_offset in range(days_back, -1, -1):
             check_date = today - timedelta(days=day_offset)
             
-            for shift in shift_utils.get_shifts():
-                shift_code = shift["code"]
-                
-                # Bu gün için bu vardiya bitmiş mi?
-                # Bugünse _resolve_shift_date'e bak; geçmiş günler için kesin bitmiş
-                if check_date == today:
-                    resolved = self._resolve_shift_date(shift, now)
-                    if resolved != today:
-                        continue  # Henüz bitmedi veya başka güne ait
-                
-                for line_id in self.lines:
+            for line_id in self.lines:
+                for shift in shift_utils.get_shifts(line_id=line_id, dt=check_date):
+                    shift_code = shift["code"]
+
+                    # Bu gün için bu vardiya bitmiş mi?
+                    # Bugünse kesin özet anına bak; geçmiş günler bitmiş.
+                    if check_date == today:
+                        summary_at = shift_utils.shift_summary_datetime(
+                            shift,
+                            check_date,
+                            now.tzinfo,
+                        )
+                        if now < summary_at:
+                            continue
                     if self._summary_exists(line_id, check_date, shift_code):
                         continue
                     logger.info(

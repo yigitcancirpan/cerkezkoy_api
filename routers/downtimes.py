@@ -156,13 +156,28 @@ def stop_downtime(
     if not downtime:
         raise HTTPException(404, "Aktif duruş bulunamadı")
 
-    now = _now_utc()
-    duration = int((now - downtime.started_at).total_seconds())
+    request_now = _now_utc()
+    ended_at = req.ended_at or request_now
+    if ended_at.tzinfo is None:
+        ended_at = ended_at.replace(tzinfo=timezone.utc)
 
-    downtime.ended_at = now
+    started_at = downtime.started_at
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+
+    # Geçmiş vardiya sonuna geri tarihlemek geçerlidir; fakat başlangıçtan
+    # önce veya gelecekte bir bitiş veri bütünlüğünü bozar.
+    if ended_at < started_at:
+        raise HTTPException(422, "Bitiş zamanı başlangıç zamanından önce olamaz")
+    if ended_at > request_now + timedelta(seconds=5):
+        raise HTTPException(422, "Bitiş zamanı gelecekte olamaz")
+
+    duration = int((ended_at - started_at).total_seconds())
+
+    downtime.ended_at = ended_at
     downtime.duration_sec = duration
     downtime.is_active = False
-    downtime.updated_at = now
+    downtime.updated_at = request_now
     if req.notes:
         downtime.notes = (downtime.notes or "") + f"\n[Kapanış] {req.notes}"
 

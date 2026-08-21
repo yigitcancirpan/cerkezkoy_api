@@ -2,8 +2,8 @@
 Sistem Ayarları API — routers/settings.py
 main.py'a ekle:  from routers import settings; app.include_router(settings.router)
 """
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import Optional
@@ -15,14 +15,28 @@ def _publish_config_reload():
     """Vardiya/ayar değişti → servislere anlık haber ver (cache invalidate)."""
     try:
         import paho.mqtt.publish as publish
-        import json, time
+        import json, os, time
+        username = os.getenv("MQTT_USERNAME")
+        auth = None
+        if username:
+            auth = {
+                "username": username,
+                "password": os.getenv("MQTT_PASSWORD", ""),
+            }
         publish.single(
             "fabrika/config",   # hat bağımsız — tüm servisler dinler
             payload=json.dumps({"reload": True, "ts": time.time()}),
-            hostname="127.0.0.1", port=1883,
+            hostname=os.getenv("MQTT_BROKER", "127.0.0.1"),
+            port=int(os.getenv("MQTT_PORT", "1883")),
+            auth=auth,
         )
-    except Exception:
-        pass   # MQTT yoksa sessiz geç — 60sn TTL zaten devreye girer
+    except Exception as exc:
+        # MQTT geçici yoksa 60sn TTL yine devreye girer; hata görünür olsun.
+        import logging
+        logging.getLogger("settings").warning(
+            "Vardiya config MQTT bildirimi gönderilemedi: %s",
+            exc,
+        )
     # API kendi shift_utils cache'ini de hemen tazele
     try:
         import shift_utils
@@ -87,50 +101,161 @@ def set_oil_threshold(press_id: int, body: OilThreshold, db: Session = Depends(g
 class ShiftUpsert(BaseModel):
     code: str
     label: str
-    start_hour: int
-    end_hour: int
-    latest_end: int
-    window_hours: int
-    planned_seconds: int
+    start_hour: int = Field(ge=0, le=23)
+    end_hour: int = Field(ge=1, le=24)
+    latest_end: int = Field(ge=0, le=24)
+    window_hours: int = Field(ge=1, le=24)
+    planned_seconds: int = Field(gt=0)
     display_order: int = 0
     is_active: bool = True
+    line_id: Optional[int] = None
+    # PostgreSQL convention: 0=Pazar, 1=Pazartesi, ... 6=Cumartesi.
+    # NULL olan satır genel varsayılandır.
+    day_of_week: Optional[int] = Field(default=None, ge=0, le=6)
+
+
+def _shift_key_params(code: str, line_id: int, day_of_week: int):
+    return {
+        "code": code,
+        "lid": None if line_id == -1 else line_id,
+        "dow": None if day_of_week == -1 else day_of_week,
+    }
+
+
+def _shift_exists(db: Session, code: str, line_id, day_of_week) -> bool:
+    return db.execute(text("""
+        SELECT 1
+        FROM shift_config
+        WHERE code = :code
+          AND line_id IS NOT DISTINCT FROM :lid
+          AND day_of_week IS NOT DISTINCT FROM :dow
+        LIMIT 1
+    """), {"code": code, "lid": line_id, "dow": day_of_week}).fetchone() is not None
+
+
+def _shift_values(body: ShiftUpsert):
+    end_offset = body.end_hour if body.end_hour > body.start_hour else body.end_hour + 24
+    latest_offset = (
+        body.latest_end
+        if body.latest_end > body.start_hour
+        else body.latest_end + 24
+    )
+    if latest_offset < end_offset:
+        raise HTTPException(
+            422,
+            "Özet yazma saati vardiya bitişinden önce olamaz",
+        )
+    calculated_window = end_offset - body.start_hour
+    return {
+        "code": body.code,
+        "label": body.label,
+        "sh": body.start_hour,
+        "eh": body.end_hour,
+        "le": body.latest_end,
+        "wh": calculated_window,
+        "ps": body.planned_seconds,
+        "ord": body.display_order,
+        "act": body.is_active,
+        "lid": body.line_id,
+        "dow": body.day_of_week,
+    }
 
 
 @router.get("/shifts")
 def get_shifts(db: Session = Depends(get_db)):
     rows = db.execute(text("""
         SELECT code, label, start_hour, end_hour, latest_end,
-               window_hours, planned_seconds, display_order, is_active
-        FROM shift_config ORDER BY display_order, start_hour
+               window_hours, planned_seconds, display_order, is_active,
+               line_id, day_of_week
+        FROM shift_config
+        ORDER BY day_of_week NULLS FIRST, line_id NULLS FIRST,
+                 display_order, start_hour
     """)).fetchall()
     return [dict(r._mapping) for r in rows]
 
 
-@router.put("/shifts/{code}")
-def upsert_shift(code: str, body: ShiftUpsert, db: Session = Depends(get_db)):
+@router.post("/shifts", status_code=201)
+def create_shift(body: ShiftUpsert, db: Session = Depends(get_db)):
+    values = _shift_values(body)
+    if _shift_exists(db, body.code, body.line_id, body.day_of_week):
+        raise HTTPException(
+            409,
+            "Bu kod, hat ve gün kapsamı için vardiya zaten var",
+        )
     db.execute(text("""
         INSERT INTO shift_config
             (code, label, start_hour, end_hour, latest_end,
-             window_hours, planned_seconds, display_order, is_active, line_id, updated_at)
-        VALUES (:code,:label,:sh,:eh,:le,:wh,:ps,:ord,:act,:lid,NOW())
-        ON CONFLICT (code, COALESCE(line_id, -1)) DO UPDATE SET
-            label=EXCLUDED.label, start_hour=EXCLUDED.start_hour,
-            end_hour=EXCLUDED.end_hour, latest_end=EXCLUDED.latest_end,
-            window_hours=EXCLUDED.window_hours, planned_seconds=EXCLUDED.planned_seconds,
-            display_order=EXCLUDED.display_order, is_active=EXCLUDED.is_active,
-            updated_at=NOW()
-    """), {"code": body.code, "label": body.label, "sh": body.start_hour,
-           "eh": body.end_hour, "le": body.latest_end, "wh": body.window_hours,
-           "ps": body.planned_seconds, "ord": body.display_order, "act": body.is_active,
-           "lid": None})          # ← global vardiya: line_id = NULL
+             window_hours, planned_seconds, display_order, is_active,
+             line_id, day_of_week, updated_at)
+        VALUES (:code,:label,:sh,:eh,:le,:wh,:ps,:ord,:act,:lid,:dow,NOW())
+    """), values)
     db.commit()
     _publish_config_reload()
-    return {"code": code, "message": "Vardiya kaydedildi"}
+    return {"code": body.code, "message": "Vardiya oluşturuldu"}
+
+
+@router.put("/shifts/{code}")
+def update_shift(
+    code: str,
+    body: ShiftUpsert,
+    scope_line_id: int = Query(-1, ge=-1),
+    scope_day_of_week: int = Query(-1, ge=-1, le=6),
+    db: Session = Depends(get_db),
+):
+    original = _shift_key_params(code, scope_line_id, scope_day_of_week)
+    if not _shift_exists(db, code, original["lid"], original["dow"]):
+        raise HTTPException(404, "Düzenlenecek vardiya satırı bulunamadı")
+
+    # Kapsam değiştiriliyorsa hedef anahtarın başka satıra ait olmadığını
+    # önceden denetle. Böylece genel ve cumartesi vardiyaları karışmaz.
+    target_changed = (
+        body.code != code
+        or body.line_id != original["lid"]
+        or body.day_of_week != original["dow"]
+    )
+    if target_changed and _shift_exists(
+        db,
+        body.code,
+        body.line_id,
+        body.day_of_week,
+    ):
+        raise HTTPException(409, "Hedef vardiya kapsamı zaten kullanılıyor")
+
+    values = _shift_values(body)
+    values.update({"old_code": code, "old_lid": original["lid"], "old_dow": original["dow"]})
+    result = db.execute(text("""
+        UPDATE shift_config
+        SET code=:code, label=:label, start_hour=:sh, end_hour=:eh,
+            latest_end=:le, window_hours=:wh, planned_seconds=:ps,
+            display_order=:ord, is_active=:act, line_id=:lid,
+            day_of_week=:dow, updated_at=NOW()
+        WHERE code=:old_code
+          AND line_id IS NOT DISTINCT FROM :old_lid
+          AND day_of_week IS NOT DISTINCT FROM :old_dow
+    """), values)
+    if result.rowcount != 1:
+        db.rollback()
+        raise HTTPException(409, "Vardiya satırı tekil olarak güncellenemedi")
+    db.commit()
+    _publish_config_reload()
+    return {"code": body.code, "message": "Vardiya güncellendi"}
 
 
 @router.delete("/shifts/{code}")
-def delete_shift(code: str, db: Session = Depends(get_db)):
-    res = db.execute(text("DELETE FROM shift_config WHERE code=:c RETURNING code"), {"c": code}).fetchone()
+def delete_shift(
+    code: str,
+    scope_line_id: int = Query(-1, ge=-1),
+    scope_day_of_week: int = Query(-1, ge=-1, le=6),
+    db: Session = Depends(get_db),
+):
+    params = _shift_key_params(code, scope_line_id, scope_day_of_week)
+    res = db.execute(text("""
+        DELETE FROM shift_config
+        WHERE code=:code
+          AND line_id IS NOT DISTINCT FROM :lid
+          AND day_of_week IS NOT DISTINCT FROM :dow
+        RETURNING code
+    """), params).fetchone()
     db.commit()
     if not res:
         raise HTTPException(404, "Vardiya bulunamadı")

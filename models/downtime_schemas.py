@@ -50,6 +50,9 @@ class DowntimeStartResponse(BaseModel):
 # ─── DURUŞ BİTİR ──────────────────────────────
 class DowntimeStopRequest(BaseModel):
     notes: Optional[str] = None
+    # Otomatik vardiya kapanışı gerçek vardiya bitişini gönderir. Boşsa
+    # operatörün isteği işlendiği an kullanılır.
+    ended_at: Optional[datetime] = None
 
 
 class DowntimeStopResponse(BaseModel):

@@ -142,7 +142,13 @@ def get_shifts(force=False, line_id=None, dt=None):
     ovr = _line_filter([o for o in _state.get("overrides", [])
                         if o["override_date"] == the_date])
     if ovr:
-        base = {s["code"]: dict(s) for s in _state["shifts"]}
+        scoped = _line_filter(_state["shifts"])
+        general = [s for s in scoped if s.get("day_of_week") is None]
+        day_specific = [s for s in scoped if s.get("day_of_week") == pg_dow]
+        # Aynı kod genel ve güne özel satırda bulunabilir. Önce geneli,
+        # sonra o günün satırını koyarak override için doğru tabanı seç.
+        base = {s["code"]: dict(s) for s in general}
+        base.update({s["code"]: dict(s) for s in day_specific})
         out = []
         for o in ovr:
             row = base.get(o["code"], dict(_FALLBACK_SHIFT)).copy()
@@ -199,6 +205,52 @@ def shift_by_code(code: str, line_id: int = None, dt=None):
     return get_shifts(line_id=line_id, dt=dt)[0]
 
 
+def shift_date_for_datetime(shift: dict, dt: datetime) -> date:
+    """``dt`` anının ait olduğu vardiya tarihini döndür.
+
+    Gece yarısını geçen bir vardiyada (ör. 22:00–06:00) 02:00 anı bir
+    önceki takvim gününde başlayan vardiyaya aittir. Normal vardiyalarda
+    tarih doğrudan ``dt.date()`` olur.
+    """
+    start_hour = int(shift["start_hour"])
+    end_hour = int(shift["end_hour"])
+    crosses_midnight = end_hour <= start_hour
+    if crosses_midnight and dt.hour < end_hour:
+        return (dt - timedelta(days=1)).date()
+    return dt.date()
+
+
+def shift_end_datetime(shift: dict, shift_date: date, tzinfo=None) -> datetime:
+    """DB vardiya tanımından kesin bitiş zamanını üret.
+
+    ``end_hour=24`` ve gece yarısını geçen vardiyalar desteklenir. Bu
+    fonksiyon sabit hafta içi/cumartesi saati içermez; kendisine verilen
+    satır ``get_shifts``/``shift_by_code`` ile DB'den çözülmelidir.
+    """
+    start_hour = int(shift["start_hour"])
+    end_hour = int(shift["end_hour"])
+    start_at = datetime.combine(shift_date, datetime.min.time(), tzinfo=tzinfo)
+    start_at += timedelta(hours=start_hour)
+    end_at = datetime.combine(shift_date, datetime.min.time(), tzinfo=tzinfo)
+    end_at += timedelta(hours=end_hour)
+    if end_at <= start_at:
+        end_at += timedelta(days=1)
+    return end_at
+
+
+def shift_summary_datetime(shift: dict, shift_date: date, tzinfo=None) -> datetime:
+    """Bir vardiya tarihinin özet yazma anını (latest_end) döndür."""
+    start_hour = int(shift["start_hour"])
+    latest_end = int(shift["latest_end"])
+    summary_at = datetime.combine(shift_date, datetime.min.time(), tzinfo=tzinfo)
+    summary_at += timedelta(hours=latest_end)
+    start_at = datetime.combine(shift_date, datetime.min.time(), tzinfo=tzinfo)
+    start_at += timedelta(hours=start_hour)
+    if summary_at <= start_at:
+        summary_at += timedelta(days=1)
+    return summary_at
+
+
 def planned_seconds(code: str, line_id: int = None, dt=None) -> int:
     return int(shift_by_code(code, line_id, dt).get("planned_seconds")
                or _FALLBACK_SHIFT["planned_seconds"])
@@ -207,16 +259,13 @@ def planned_seconds(code: str, line_id: int = None, dt=None) -> int:
 def resolve_shift_date(shift: dict, now: datetime):
     """Vardiya şu an bitmiş mi? Bittiyse hangi shift_date'e ait, değilse None.
     (production_logger'daki mantığın taşınmış hali — Adım 4'te oraya bağlanacak.)"""
-    latest_end = shift["latest_end"]
-    start_hour = shift["start_hour"]
-    h = now.hour
-    crosses_midnight = latest_end <= start_hour
-    if not crosses_midnight:
-        return now.date() if h >= latest_end else None
-    else:
-        if h < latest_end:
-            return (now - timedelta(days=1)).date()
-        elif h >= start_hour:
-            return None
-        else:
-            return (now - timedelta(days=1)).date()
+    today = now.date()
+    today_summary = shift_summary_datetime(shift, today, now.tzinfo)
+    if now >= today_summary:
+        return today
+
+    previous = today - timedelta(days=1)
+    previous_summary = shift_summary_datetime(shift, previous, now.tzinfo)
+    if now >= previous_summary:
+        return previous
+    return None
