@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import Optional
+from datetime import date, timedelta
 from models.database import get_db
 
 router = APIRouter(prefix="/api/v1/settings", tags=["Ayarlar"])
@@ -174,6 +175,21 @@ def get_shifts(db: Session = Depends(get_db)):
     return [dict(r._mapping) for r in rows]
 
 
+@router.get("/shifts/resolved")
+def get_resolved_shifts(
+    target_date: date = Query(...),
+    line_id: Optional[int] = Query(None, ge=1),
+):
+    """Bir tarih+hat için gerçekte uygulanacak vardiyaları döndür."""
+    import shift_utils
+    rows = shift_utils.get_shifts(
+        force=True,
+        line_id=line_id,
+        dt=target_date,
+    )
+    return rows
+
+
 @router.post("/shifts", status_code=201)
 def create_shift(body: ShiftUpsert, db: Session = Depends(get_db)):
     values = _shift_values(body)
@@ -261,3 +277,192 @@ def delete_shift(
         raise HTTPException(404, "Vardiya bulunamadı")
     _publish_config_reload()
     return {"deleted": code}
+
+
+class ShiftOverrideUpsert(BaseModel):
+    override_date: date
+    code: str = Field(min_length=1, max_length=30)
+    line_id: Optional[int] = Field(default=None, ge=1)
+    label: Optional[str] = Field(default=None, max_length=60)
+    start_hour: int = Field(ge=0, le=23)
+    end_hour: int = Field(ge=1, le=24)
+    latest_end: int = Field(ge=0, le=24)
+    window_hours: int = Field(ge=1, le=24)
+    planned_seconds: int = Field(gt=0)
+    note: Optional[str] = Field(default=None, max_length=200)
+
+
+def _override_key_params(override_date: date, code: str, line_id: int):
+    return {
+        "override_date": override_date,
+        "code": code,
+        "lid": None if line_id == -1 else line_id,
+    }
+
+
+def _override_exists(db: Session, override_date: date, code: str, line_id) -> bool:
+    return db.execute(text("""
+        SELECT 1
+        FROM shift_overrides
+        WHERE override_date=:override_date
+          AND code=:code
+          AND line_id IS NOT DISTINCT FROM :lid
+        LIMIT 1
+    """), {
+        "override_date": override_date,
+        "code": code,
+        "lid": line_id,
+    }).fetchone() is not None
+
+
+def _override_values(body: ShiftOverrideUpsert, db: Session):
+    if body.line_id is not None:
+        line_exists = db.execute(text("""
+            SELECT 1 FROM production_lines WHERE line_id=:lid LIMIT 1
+        """), {"lid": body.line_id}).fetchone()
+        if not line_exists:
+            raise HTTPException(422, "Seçilen üretim hattı bulunamadı")
+
+    base_exists = db.execute(text("""
+        SELECT 1
+        FROM shift_config
+        WHERE code=:code
+          AND is_active=TRUE
+          AND (line_id IS NULL OR line_id IS NOT DISTINCT FROM :lid)
+        LIMIT 1
+    """), {"code": body.code, "lid": body.line_id}).fetchone()
+    if not base_exists:
+        raise HTTPException(422, "Aktif temel vardiya kodu bulunamadı")
+
+    end_offset = body.end_hour if body.end_hour > body.start_hour else body.end_hour + 24
+    latest_offset = (
+        body.latest_end
+        if body.latest_end > body.start_hour
+        else body.latest_end + 24
+    )
+    if latest_offset < end_offset:
+        raise HTTPException(422, "Özet yazma saati vardiya bitişinden önce olamaz")
+
+    return {
+        "override_date": body.override_date,
+        "code": body.code,
+        "lid": body.line_id,
+        "label": body.label,
+        "sh": body.start_hour,
+        "eh": body.end_hour,
+        "le": body.latest_end,
+        "wh": end_offset - body.start_hour,
+        "ps": body.planned_seconds,
+        "note": body.note,
+    }
+
+
+@router.get("/shift-overrides")
+def get_shift_overrides(
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+):
+    date_from = date_from or (date.today() - timedelta(days=30))
+    date_to = date_to or (date.today() + timedelta(days=365))
+    if date_to < date_from:
+        raise HTTPException(422, "date_to, date_from değerinden önce olamaz")
+    rows = db.execute(text("""
+        SELECT override_date, code, line_id, label, start_hour, end_hour,
+               latest_end, window_hours, planned_seconds, note, created_at
+        FROM shift_overrides
+        WHERE override_date BETWEEN :date_from AND :date_to
+        ORDER BY override_date, code, line_id NULLS FIRST
+    """), {"date_from": date_from, "date_to": date_to}).fetchall()
+    return [dict(row._mapping) for row in rows]
+
+
+@router.post("/shift-overrides", status_code=201)
+def create_shift_override(
+    body: ShiftOverrideUpsert,
+    db: Session = Depends(get_db),
+):
+    if _override_exists(db, body.override_date, body.code, body.line_id):
+        raise HTTPException(409, "Bu tarih, vardiya ve hat için istisna zaten var")
+    values = _override_values(body, db)
+    db.execute(text("""
+        INSERT INTO shift_overrides
+            (override_date, code, line_id, label, start_hour, end_hour,
+             latest_end, window_hours, planned_seconds, note)
+        VALUES
+            (:override_date,:code,:lid,:label,:sh,:eh,:le,:wh,:ps,:note)
+    """), values)
+    db.commit()
+    _publish_config_reload()
+    return {"message": "Tarihe özel vardiya oluşturuldu"}
+
+
+@router.put("/shift-overrides/{override_date}/{code}")
+def update_shift_override(
+    override_date: date,
+    code: str,
+    body: ShiftOverrideUpsert,
+    scope_line_id: int = Query(-1, ge=-1),
+    db: Session = Depends(get_db),
+):
+    original = _override_key_params(override_date, code, scope_line_id)
+    if not _override_exists(db, override_date, code, original["lid"]):
+        raise HTTPException(404, "Düzenlenecek tarih istisnası bulunamadı")
+
+    target_changed = (
+        body.override_date != override_date
+        or body.code != code
+        or body.line_id != original["lid"]
+    )
+    if target_changed and _override_exists(
+        db,
+        body.override_date,
+        body.code,
+        body.line_id,
+    ):
+        raise HTTPException(409, "Hedef tarih istisnası zaten kullanılıyor")
+
+    values = _override_values(body, db)
+    values.update({
+        "old_date": override_date,
+        "old_code": code,
+        "old_lid": original["lid"],
+    })
+    result = db.execute(text("""
+        UPDATE shift_overrides
+        SET override_date=:override_date, code=:code, line_id=:lid,
+            label=:label, start_hour=:sh, end_hour=:eh, latest_end=:le,
+            window_hours=:wh, planned_seconds=:ps, note=:note
+        WHERE override_date=:old_date
+          AND code=:old_code
+          AND line_id IS NOT DISTINCT FROM :old_lid
+    """), values)
+    if result.rowcount != 1:
+        db.rollback()
+        raise HTTPException(409, "Tarih istisnası tekil olarak güncellenemedi")
+    db.commit()
+    _publish_config_reload()
+    return {"message": "Tarihe özel vardiya güncellendi"}
+
+
+@router.delete("/shift-overrides/{override_date}/{code}")
+def delete_shift_override(
+    override_date: date,
+    code: str,
+    scope_line_id: int = Query(-1, ge=-1),
+    db: Session = Depends(get_db),
+):
+    params = _override_key_params(override_date, code, scope_line_id)
+    row = db.execute(text("""
+        DELETE FROM shift_overrides
+        WHERE override_date=:override_date
+          AND code=:code
+          AND line_id IS NOT DISTINCT FROM :lid
+        RETURNING override_date, code
+    """), params).fetchone()
+    if not row:
+        db.rollback()
+        raise HTTPException(404, "Tarih istisnası bulunamadı")
+    db.commit()
+    _publish_config_reload()
+    return {"message": "Tarihe özel vardiya silindi"}

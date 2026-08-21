@@ -132,42 +132,62 @@ def get_shifts(force=False, line_id=None, dt=None):
     pg_dow = (the_date.weekday() + 1) % 7      # 0=Pazar ... 6=Cumartesi
 
     def _line_filter(rows):
-        if line_id is not None:
-            spec = [r for r in rows if r.get("line_id") == line_id]
-            if spec:
-                return spec
-        return [r for r in rows if r.get("line_id") is None] or rows
+        general = [r for r in rows if r.get("line_id") is None]
+        if line_id is None:
+            return general or rows
 
-    # 1) Tarihe özel istisna
-    ovr = _line_filter([o for o in _state.get("overrides", [])
-                        if o["override_date"] == the_date])
-    if ovr:
-        scoped = _line_filter(_state["shifts"])
-        general = [s for s in scoped if s.get("day_of_week") is None]
-        day_specific = [s for s in scoped if s.get("day_of_week") == pg_dow]
-        # Aynı kod genel ve güne özel satırda bulunabilir. Önce geneli,
-        # sonra o günün satırını koyarak override için doğru tabanı seç.
-        base = {s["code"]: dict(s) for s in general}
-        base.update({s["code"]: dict(s) for s in day_specific})
-        out = []
-        for o in ovr:
-            row = base.get(o["code"], dict(_FALLBACK_SHIFT)).copy()
-            row.update({k: v for k, v in o.items()
-                        if v is not None and k != "override_date"})
-            row.setdefault("display_order", 1)
-            row["is_active"] = True
-            out.append(row)
-        return out
+        specific = [r for r in rows if r.get("line_id") == line_id]
+        if not specific:
+            return general or rows
 
-    # 2) Güne özel kural (Cumartesi vb.)
-    day_rows = _line_filter([s for s in _state["shifts"]
-                             if s.get("day_of_week") == pg_dow])
-    if day_rows:
-        return day_rows
+        # Hat satırı yalnızca aynı vardiya/gün anahtarını ezer;
+        # diğer global vardiyalar kaybolmaz.
+        merged = {
+            (r.get("code"), r.get("day_of_week")): r
+            for r in general
+        }
+        merged.update({
+            (r.get("code"), r.get("day_of_week")): r
+            for r in specific
+        })
+        return list(merged.values())
 
-    # 3) Global varsayılan
-    return _line_filter([s for s in _state["shifts"]
-                         if s.get("day_of_week") is None]) or list(_state["shifts"])
+    # Önce genel vardiyaları çöz, sonra yalnızca aynı koda ait gün kuralını
+    # üzerine yaz. Böylece bir vardiyaya Cumartesi kuralı tanımlanınca diğer
+    # global vardiyalar o gün kaybolmaz.
+    scoped = _line_filter(_state["shifts"])
+    general = [s for s in scoped if s.get("day_of_week") is None]
+    day_specific = [s for s in scoped if s.get("day_of_week") == pg_dow]
+    resolved = {s["code"]: dict(s) for s in general}
+    resolved.update({s["code"]: dict(s) for s in day_specific})
+    if not resolved:
+        resolved = {
+            s["code"]: dict(s)
+            for s in (scoped or _state["shifts"])
+        }
+
+    # Tarihe özel satır da yalnızca kendi vardiya kodunu ezer. Aynı tarihte
+    # istisnası olmayan vardiyalar, yukarıda çözülen gün/genel saatleriyle
+    # çalışmaya devam eder.
+    overrides = _line_filter([
+        o for o in _state.get("overrides", [])
+        if o["override_date"] == the_date
+    ])
+    for override in overrides:
+        row = resolved.get(override["code"], dict(_FALLBACK_SHIFT)).copy()
+        row.update({
+            key: value
+            for key, value in override.items()
+            if value is not None and key != "override_date"
+        })
+        row.setdefault("display_order", 1)
+        row["is_active"] = True
+        resolved[override["code"]] = row
+
+    return sorted(
+        resolved.values(),
+        key=lambda row: (row.get("display_order", 0), row["start_hour"]),
+    )
 
 def get_excluded_codes(force=False):
     """OEE'den hariç tutulacak reason_code'lar (mola + vardiya sonu)."""

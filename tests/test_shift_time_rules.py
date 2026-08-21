@@ -76,6 +76,128 @@ class ShiftTimeRulesTest(unittest.TestCase):
         self.assertEqual(shift["label"], "Uzun Cumartesi")
         self.assertEqual(shift["end_hour"], 18)
 
+    def test_line_specific_row_does_not_hide_other_global_shifts(self):
+        monday = date(2026, 8, 24)
+        shift_utils._state["shifts"] = [
+            {
+                "code": "vardiya_1", "label": "Global 1", "start_hour": 8,
+                "end_hour": 16, "latest_end": 16, "window_hours": 8,
+                "planned_seconds": 28800, "display_order": 1,
+                "is_active": True, "line_id": None, "day_of_week": None,
+            },
+            {
+                "code": "vardiya_2", "label": "Global 2", "start_hour": 16,
+                "end_hour": 24, "latest_end": 24, "window_hours": 8,
+                "planned_seconds": 28800, "display_order": 2,
+                "is_active": True, "line_id": None, "day_of_week": None,
+            },
+            {
+                "code": "vardiya_1", "label": "Hat 2 Özel", "start_hour": 7,
+                "end_hour": 15, "latest_end": 15, "window_hours": 8,
+                "planned_seconds": 28800, "display_order": 1,
+                "is_active": True, "line_id": 2, "day_of_week": None,
+            },
+        ]
+        rows = shift_utils.get_shifts(line_id=2, dt=monday)
+        by_code = {row["code"]: row for row in rows}
+        self.assertEqual(set(by_code), {"vardiya_1", "vardiya_2"})
+        self.assertEqual(by_code["vardiya_1"]["label"], "Hat 2 Özel")
+        self.assertEqual(by_code["vardiya_2"]["label"], "Global 2")
+
+    def test_line_override_does_not_hide_other_global_date_overrides(self):
+        target = date(2026, 8, 29)
+        shift_utils._state["shifts"] = [
+            {
+                "code": "vardiya_1", "label": "Global 1", "start_hour": 8,
+                "end_hour": 16, "latest_end": 16, "window_hours": 8,
+                "planned_seconds": 28800, "display_order": 1,
+                "is_active": True, "line_id": None, "day_of_week": None,
+            },
+            {
+                "code": "vardiya_2", "label": "Global 2", "start_hour": 16,
+                "end_hour": 24, "latest_end": 24, "window_hours": 8,
+                "planned_seconds": 28800, "display_order": 2,
+                "is_active": True, "line_id": None, "day_of_week": None,
+            },
+        ]
+        shift_utils._state["overrides"] = [
+            {
+                "override_date": target, "code": "vardiya_1", "line_id": None,
+                "label": "Global Özel 1", "start_hour": 8, "end_hour": 18,
+                "latest_end": 18, "window_hours": 10, "planned_seconds": 36000,
+            },
+            {
+                "override_date": target, "code": "vardiya_2", "line_id": None,
+                "label": "Global Özel 2", "start_hour": 18, "end_hour": 24,
+                "latest_end": 24, "window_hours": 6, "planned_seconds": 21600,
+            },
+            {
+                "override_date": target, "code": "vardiya_1", "line_id": 2,
+                "label": "Hat 2 Özel 1", "start_hour": 7, "end_hour": 17,
+                "latest_end": 17, "window_hours": 10, "planned_seconds": 36000,
+            },
+        ]
+        rows = shift_utils.get_shifts(line_id=2, dt=target)
+        by_code = {row["code"]: row for row in rows}
+        self.assertEqual(set(by_code), {"vardiya_1", "vardiya_2"})
+        self.assertEqual(by_code["vardiya_1"]["label"], "Hat 2 Özel 1")
+        self.assertEqual(by_code["vardiya_2"]["label"], "Global Özel 2")
+
+    def test_single_date_override_does_not_hide_other_base_shift(self):
+        target = date(2026, 8, 29)
+        shift_utils._state["shifts"] = [
+            {
+                "code": "vardiya_1", "label": "Cumartesi 1", "start_hour": 8,
+                "end_hour": 16, "latest_end": 16, "window_hours": 8,
+                "planned_seconds": 28800, "display_order": 1,
+                "is_active": True, "line_id": None, "day_of_week": 6,
+            },
+            {
+                "code": "vardiya_2", "label": "Global 2", "start_hour": 16,
+                "end_hour": 24, "latest_end": 24, "window_hours": 8,
+                "planned_seconds": 28800, "display_order": 2,
+                "is_active": True, "line_id": None, "day_of_week": None,
+            },
+        ]
+        shift_utils._state["overrides"] = [{
+            "override_date": target, "code": "vardiya_1", "line_id": None,
+            "label": "Uzun Cumartesi", "start_hour": 8, "end_hour": 18,
+            "latest_end": 18, "window_hours": 10, "planned_seconds": 36000,
+        }]
+        rows = shift_utils.get_shifts(dt=target)
+        by_code = {row["code"]: row for row in rows}
+        self.assertEqual(set(by_code), {"vardiya_1", "vardiya_2"})
+        self.assertEqual(by_code["vardiya_1"]["label"], "Uzun Cumartesi")
+        self.assertEqual(by_code["vardiya_2"]["label"], "Global 2")
+
+    def test_day_rule_does_not_hide_other_global_shift(self):
+        target = date(2026, 8, 29)
+        shift_utils._state["shifts"] = [
+            {
+                "code": "vardiya_1", "label": "Global 1", "start_hour": 8,
+                "end_hour": 18, "latest_end": 18, "window_hours": 10,
+                "planned_seconds": 36000, "display_order": 1,
+                "is_active": True, "line_id": None, "day_of_week": None,
+            },
+            {
+                "code": "vardiya_2", "label": "Global 2", "start_hour": 18,
+                "end_hour": 24, "latest_end": 24, "window_hours": 6,
+                "planned_seconds": 21600, "display_order": 2,
+                "is_active": True, "line_id": None, "day_of_week": None,
+            },
+            {
+                "code": "vardiya_1", "label": "Cumartesi 1", "start_hour": 8,
+                "end_hour": 16, "latest_end": 16, "window_hours": 8,
+                "planned_seconds": 28800, "display_order": 1,
+                "is_active": True, "line_id": None, "day_of_week": 6,
+            },
+        ]
+        rows = shift_utils.get_shifts(dt=target)
+        by_code = {row["code"]: row for row in rows}
+        self.assertEqual(set(by_code), {"vardiya_1", "vardiya_2"})
+        self.assertEqual(by_code["vardiya_1"]["label"], "Cumartesi 1")
+        self.assertEqual(by_code["vardiya_2"]["label"], "Global 2")
+
     def test_overnight_shift_uses_previous_shift_date(self):
         shift = {"start_hour": 22, "end_hour": 6}
         observed = datetime(2026, 8, 23, 2, 0, tzinfo=timezone.utc)

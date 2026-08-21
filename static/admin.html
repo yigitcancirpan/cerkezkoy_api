@@ -203,6 +203,15 @@
     <table><thead><tr>
       <th>Vardiya</th><th>Kod</th><th>Uygulandığı Gün</th><th>Saat</th><th>Özet Saati</th><th>Planlanan</th><th>Durum</th><th></th>
     </tr></thead><tbody id="shift-rows"></tbody></table>
+
+    <div class="row-between" style="margin-top:34px">
+      <h2>Tarihe Özel Vardiyalar</h2>
+      <button class="btn" onclick="openShiftOverride(null)">+ Tarihe Özel Saat</button>
+    </div>
+    <p class="hint">Yalnızca seçilen tarihte uygulanır ve genel/günlük vardiya tanımını değiştirmez. Örneğin tek bir cumartesiyi 08:00–18:00 yapmak için kullanın.</p>
+    <table><thead><tr>
+      <th>Tarih</th><th>Vardiya</th><th>Kapsam</th><th>Saat</th><th>Özet Saati</th><th>Planlanan</th><th>Not</th><th></th>
+    </tr></thead><tbody id="shift-override-rows"></tbody></table>
   </div>
   <!-- ── AYARLAR ── -->
   <div class="section" id="sec-settings">
@@ -305,6 +314,40 @@
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeModal('shift-modal')">İptal</button>
       <button class="btn" onclick="saveShift()">Kaydet</button>
+    </div>
+  </div>
+</div>
+<!-- ── TARİHE ÖZEL VARDİYA MODALI ── -->
+<div class="overlay" id="shift-override-modal">
+  <div class="modal">
+    <h3 id="shift-override-title">Tarihe Özel Vardiya</h3>
+    <input type="hidden" id="so-orig-date">
+    <input type="hidden" id="so-orig-code">
+    <input type="hidden" id="so-orig-line">
+    <div class="grid2">
+      <div class="field"><label>Tarih</label><input type="date" id="so-date" onchange="loadOverrideBase()"></div>
+      <div class="field"><label>Vardiya</label><select id="so-code" onchange="loadOverrideBase()"></select></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Kapsam</label>
+        <select id="so-scope" onchange="loadOverrideBase()">
+          <option value="">Tüm hatlar</option>
+        </select>
+      </div>
+      <div class="field"><label>Görünen ad (opsiyonel)</label><input id="so-label" placeholder="ör. Uzun Cumartesi"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Başlangıç saati</label><input type="number" id="so-start" min="0" max="23"></div>
+      <div class="field"><label>Bitiş saati</label><input type="number" id="so-end" min="1" max="24"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Özet yazma saati</label><input type="number" id="so-latest" min="0" max="24"></div>
+      <div class="field"><label>Planlanan süre (saat)</label><input type="number" id="so-hours" step="0.25" min="0.25"></div>
+    </div>
+    <div class="field"><label>Not (opsiyonel)</label><input id="so-note" maxlength="200" placeholder="ör. Fazla mesai"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeModal('shift-override-modal')">İptal</button>
+      <button class="btn" onclick="saveShiftOverride()">Kaydet</button>
     </div>
   </div>
 </div>
@@ -878,11 +921,16 @@ function shiftScopeQuery(s){
   return new URLSearchParams({scope_line_id:String(line), scope_day_of_week:String(day)}).toString();
 }
 
+let shiftsCache = [];
+let shiftOverridesCache = [];
+
 async function loadShifts(){
   const rows = await api('GET', '/api/v1/settings/shifts');
+  shiftsCache = rows;
   const tbody = document.getElementById('shift-rows');
-  if(!rows.length){ tbody.innerHTML = '<tr><td colspan="8" class="hint">Vardiya tanımı yok.</td></tr>'; return; }
-  tbody.innerHTML = rows.map(s=>{
+  if(!rows.length){
+    tbody.innerHTML = '<tr><td colspan="8" class="hint">Vardiya tanımı yok.</td></tr>';
+  }else tbody.innerHTML = rows.map(s=>{
     const hrs = (s.planned_seconds/3600);
     const hrsTxt = Number.isInteger(hrs) ? hrs : hrs.toFixed(2);
     const dayLabel = s.day_of_week == null ? 'Genel' : SHIFT_DAYS[s.day_of_week];
@@ -900,6 +948,178 @@ async function loadShifts(){
       </td>
     </tr>`;
   }).join('');
+  await loadShiftOverrides();
+}
+
+function dateText(value){
+  if(!value) return '—';
+  const [y,m,d] = value.split('-');
+  return `${d}.${m}.${y}`;
+}
+
+function localDateInput(value){
+  const y = value.getFullYear();
+  const m = String(value.getMonth()+1).padStart(2,'0');
+  const d = String(value.getDate()).padStart(2,'0');
+  return `${y}-${m}-${d}`;
+}
+
+function nextSaturdayInput(){
+  const value = new Date();
+  value.setDate(value.getDate() + ((6 - value.getDay() + 7) % 7));
+  return localDateInput(value);
+}
+
+async function loadShiftOverrides(){
+  const rows = await api('GET', '/api/v1/settings/shift-overrides');
+  shiftOverridesCache = rows;
+  const tbody = document.getElementById('shift-override-rows');
+  if(!rows.length){
+    tbody.innerHTML = '<tr><td colspan="8" class="hint">Tanımlı tarih istisnası yok.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map((o,index)=>{
+    const hrs = o.planned_seconds/3600;
+    const hrsTxt = Number.isInteger(hrs) ? hrs : hrs.toFixed(2);
+    return `<tr>
+      <td><strong>${dateText(o.override_date)}</strong></td>
+      <td>${esc(o.label || o.code)} <span class="code">${esc(o.code)}</span></td>
+      <td>${o.line_id == null ? 'Tüm hatlar' : `Hat ${o.line_id}`}</td>
+      <td>${String(o.start_hour).padStart(2,'0')}:00 – ${String(o.end_hour%24).padStart(2,'0')}:00</td>
+      <td>${String(o.latest_end%24).padStart(2,'0')}:00</td>
+      <td>${hrsTxt} saat</td>
+      <td>${esc(o.note || '—')}</td>
+      <td style="text-align:right; white-space:nowrap">
+        <button class="btn ghost sm" onclick="openShiftOverrideByIndex(${index})">Düzenle</button>
+        <button class="btn danger sm" onclick="delShiftOverride(${index})">Sil</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function overrideScopeQuery(item){
+  return new URLSearchParams({
+    scope_line_id: String(item.line_id == null ? -1 : item.line_id)
+  }).toString();
+}
+
+function openShiftOverrideByIndex(index){
+  openShiftOverride(shiftOverridesCache[index]);
+}
+
+async function openShiftOverride(item){
+  const codes = [...new Set(shiftsCache.filter(s=>s.is_active).map(s=>s.code))];
+  if(!codes.length) return toast('Aktif vardiya tanımı yok', false);
+  if(!linesCache.length){
+    try{ linesCache = await api('GET', '/api/v1/lines'); }
+    catch(error){ return toast('Hat listesi alınamadı: '+error.message, false); }
+  }
+  document.getElementById('so-code').innerHTML = codes.map(code=>
+    `<option value="${esc(code)}">${esc(code)}</option>`
+  ).join('');
+  document.getElementById('so-scope').innerHTML = `
+    <option value="">Tüm hatlar</option>
+    ${linesCache.map(line=>
+      `<option value="${line.line_id}">${esc(line.line_name)} (Hat ${line.line_id})</option>`
+    ).join('')}`;
+
+  document.getElementById('shift-override-title').textContent = item
+    ? 'Tarih İstisnasını Düzenle' : 'Tarihe Özel Vardiya';
+  document.getElementById('so-orig-date').value = item ? item.override_date : '';
+  document.getElementById('so-orig-code').value = item ? item.code : '';
+  document.getElementById('so-orig-line').value = item && item.line_id != null ? item.line_id : '';
+  document.getElementById('so-date').min = localDateInput(new Date());
+  document.getElementById('so-date').value = item ? item.override_date : nextSaturdayInput();
+  document.getElementById('so-code').value = item ? item.code : codes[0];
+  document.getElementById('so-scope').value = item && item.line_id != null ? String(item.line_id) : '';
+  document.getElementById('so-label').value = item ? (item.label || '') : '';
+  document.getElementById('so-note').value = item ? (item.note || '') : '';
+
+  if(item){
+    document.getElementById('so-start').value = item.start_hour;
+    document.getElementById('so-end').value = item.end_hour;
+    document.getElementById('so-latest').value = item.latest_end;
+    document.getElementById('so-hours').value = item.planned_seconds/3600;
+  }else{
+    await loadOverrideBase();
+  }
+  document.getElementById('shift-override-modal').classList.add('show');
+}
+
+async function loadOverrideBase(){
+  const targetDate = document.getElementById('so-date').value;
+  const code = document.getElementById('so-code').value;
+  const scope = document.getElementById('so-scope').value;
+  if(!targetDate || !code) return;
+  const params = new URLSearchParams({target_date:targetDate});
+  if(scope !== '') params.set('line_id', scope);
+  try{
+    const rows = await api('GET', `/api/v1/settings/shifts/resolved?${params}`);
+    const base = rows.find(row=>row.code===code);
+    if(!base) return toast('Bu tarih için temel vardiya bulunamadı', false);
+    document.getElementById('so-start').value = base.start_hour;
+    document.getElementById('so-end').value = base.end_hour;
+    document.getElementById('so-latest').value = base.latest_end;
+    document.getElementById('so-hours').value = base.planned_seconds/3600;
+  }catch(error){ toast(error.message, false); }
+}
+
+async function saveShiftOverride(){
+  const originalDate = document.getElementById('so-orig-date').value;
+  const originalCode = document.getElementById('so-orig-code').value;
+  const originalLineRaw = document.getElementById('so-orig-line').value;
+  const overrideDate = document.getElementById('so-date').value;
+  const code = document.getElementById('so-code').value;
+  const lineRaw = document.getElementById('so-scope').value;
+  const startHour = parseInt(document.getElementById('so-start').value);
+  const endHour = parseInt(document.getElementById('so-end').value);
+  const latestHour = parseInt(document.getElementById('so-latest').value);
+  const hours = parseFloat(document.getElementById('so-hours').value);
+  if(!overrideDate || !code) return toast('Tarih ve vardiya gerekli', false);
+  if(!hours || hours <= 0) return toast('Planlanan süre 0\'dan büyük olmalı', false);
+  const endOffset = endHour > startHour ? endHour : endHour + 24;
+  const latestOffset = latestHour > startHour ? latestHour : latestHour + 24;
+  if(latestOffset < endOffset) return toast('Özet saati vardiya bitişinden önce olamaz', false);
+  const body = {
+    override_date: overrideDate,
+    code,
+    line_id: lineRaw === '' ? null : parseInt(lineRaw),
+    label: document.getElementById('so-label').value.trim() || null,
+    start_hour: startHour,
+    end_hour: endHour,
+    latest_end: latestHour,
+    window_hours: endOffset-startHour,
+    planned_seconds: Math.round(hours*3600),
+    note: document.getElementById('so-note').value.trim() || null,
+  };
+  try{
+    if(originalDate){
+      const original = {line_id: originalLineRaw === '' ? null : parseInt(originalLineRaw)};
+      await api(
+        'PUT',
+        `/api/v1/settings/shift-overrides/${originalDate}/${encodeURIComponent(originalCode)}?${overrideScopeQuery(original)}`,
+        body
+      );
+    }else{
+      await api('POST', '/api/v1/settings/shift-overrides', body);
+    }
+    closeModal('shift-override-modal');
+    toast('Tarih istisnası kaydedildi — yalnızca seçilen gün uygulanacak');
+    loadShiftOverrides();
+  }catch(error){ toast(error.message, false); }
+}
+
+async function delShiftOverride(index){
+  const item = shiftOverridesCache[index];
+  if(!confirm(`${dateText(item.override_date)} tarih istisnası silinsin mi?`)) return;
+  try{
+    await api(
+      'DELETE',
+      `/api/v1/settings/shift-overrides/${item.override_date}/${encodeURIComponent(item.code)}?${overrideScopeQuery(item)}`
+    );
+    toast('Tarih istisnası silindi');
+    loadShiftOverrides();
+  }catch(error){ toast(error.message, false); }
 }
 
 function openShift(s){
