@@ -356,39 +356,50 @@ document.querySelectorAll('.chart-card').forEach(card=>{
 function fmtDM(iso){if(!iso)return '';const d=new Date(iso+'T00:00:00');return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`;}
 function fmtHM(ms){const d=new Date(ms);return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;}
 function todayLocal(){const n=new Date();return new Date(n.getTime()-n.getTimezoneOffset()*60000).toISOString().slice(0,10);}
+function dateNDaysAgo(n){const d=new Date();d.setDate(d.getDate()-n);return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);}
 function timeTicks(series){const xs=[];series.forEach(s=>s.pts.forEach(p=>xs.push(p.x)));if(!xs.length)return[];const mn=Math.min(...xs),mx=Math.max(...xs);const t=[];for(let i=0;i<=6;i++){const x=mn+(mx-mn)*i/6;t.push({x,label:fmtHM(x)});}return t;}
 
 let prodDays=15;
 async function loadProduction(){
   try{
-    const r=await fetch(`${API}/api/v1/production/shifts?line_id=${LID}&days=${prodDays}`);
-    if(!r.ok){emptyMsg(document.getElementById('prodChart'),'Veri alınamadı');return;}
-    const rows=await r.json();
+    const [shiftResponse,oeeResponse]=await Promise.all([
+      fetch(`${API}/api/v1/production/shifts?line_id=${LID}&days=${prodDays}`),
+      fetch(`${API}/api/v1/production/oee?line_id=${LID}&date_from=${dateNDaysAgo(prodDays)}&date_to=${todayLocal()}`)
+    ]);
+    if(!shiftResponse.ok||!oeeResponse.ok){
+      emptyMsg(document.getElementById('prodChart'),'Veri alınamadı');
+      emptyMsg(document.getElementById('oeeChart'),'OEE verisi alınamadı');
+      return;
+    }
+    const rows=await shiftResponse.json();
+    const oeeData=await oeeResponse.json();
     const byDate={};
     rows.forEach(s=>{
       const d=s.shift_date;
-      if(!byDate[d])byDate[d]={good:0,scrap:0,prod:0,oeeSum:0,oeeW:0};
+      if(!byDate[d])byDate[d]={good:0,scrap:0,prod:0};
       const prod=s.total_produced||0,scrap=s.total_scrap||0;
       byDate[d].prod+=prod;byDate[d].scrap+=scrap;byDate[d].good+=Math.max(prod-scrap,0);
-      byDate[d].oeeSum+=(s.oee_overall||0)*(prod||1);byDate[d].oeeW+=(prod||1);
     });
     const dates=Object.keys(byDate).sort();
-    let tP=0,tS=0,oS=0,oW=0;
-    dates.forEach(d=>{tP+=byDate[d].prod;tS+=byDate[d].scrap;oS+=byDate[d].oeeSum;oW+=byDate[d].oeeW;});
+    let tP=0,tS=0;
+    dates.forEach(d=>{tP+=byDate[d].prod;tS+=byDate[d].scrap;});
     document.getElementById('kProd').textContent=tP.toLocaleString('tr-TR');
     document.getElementById('kScrap').textContent=tS.toLocaleString('tr-TR');
-    document.getElementById('kOee').textContent=oW>0?`%${(oS/oW).toFixed(1)}`:'—';
+    const overall=+(oeeData.oee||{}).overall;
+    document.getElementById('kOee').textContent=Number.isFinite(overall)?`%${overall.toFixed(1)}`:'—';
     document.getElementById('kDays').textContent=dates.length;
     const barData=dates.map(d=>({label:fmtDM(d),good:byDate[d].good,scrap:byDate[d].scrap}));
     specs.prod={type:'bar',payload:barData,title:'Günlük Üretim'};
     renderInto(document.getElementById('prodChart'),specs.prod);
-    const oeePts=dates.map((d,i)=>({x:i,y:byDate[d].oeeW>0?+(byDate[d].oeeSum/byDate[d].oeeW).toFixed(1):null}));
-    const step=dates.length>16?Math.ceil(dates.length/16):1;
-    const oeeTicks=dates.map((d,i)=>({x:i,label:fmtDM(d)})).filter((_,i)=>i%step===0);
+    const oeeDaily=oeeData.daily||[];
+    const oeeDates=oeeDaily.map(item=>item.date);
+    const oeePts=oeeDaily.map((item,i)=>({x:i,y:+item.overall}));
+    const step=oeeDates.length>16?Math.ceil(oeeDates.length/16):1;
+    const oeeTicks=oeeDates.map((d,i)=>({x:i,label:fmtDM(d)})).filter((_,i)=>i%step===0);
     specs.oee={type:'line',title:'Günlük OEE (%)',payload:{
       series:[{name:'OEE',color:'var(--cyan)',pts:oeePts}],
       xTicks:oeeTicks,yMin:0,yMax:100,yFmt:v=>v.toFixed(0),
-      tipXLabel:i=>fmtDM(dates[Math.round(i)]),tipYFmt:v=>'%'+v.toFixed(1)
+      tipXLabel:i=>fmtDM(oeeDates[Math.round(i)]),tipYFmt:v=>'%'+v.toFixed(1)
     }};
     renderInto(document.getElementById('oeeChart'),specs.oee);
   }catch(e){emptyMsg(document.getElementById('prodChart'),'Hata: '+e.message);}

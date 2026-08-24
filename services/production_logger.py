@@ -22,8 +22,12 @@ from datetime import datetime, date, timedelta
 from typing import Optional
 import paho.mqtt.client as mqtt
 import psycopg2
-from psycopg2.extras import RealDictCursor
 import shift_utils
+from services.oee_service import (
+    ActiveDowntimeError,
+    calculate_shift_summary,
+    upsert_shift_summary,
+)
 
 logger = logging.getLogger("production_logger")
 
@@ -90,8 +94,10 @@ class ProductionLogger:
         self._running = False
         self._db_conn = None
 
-        # Hangi vardiya özetleri bugün yazıldı
-        self._summaries_written = set()  # "2026-05-12_vardiya_1" gibi
+        # Üretimsiz tamamlanmış vardiyalar için aynı süreç içinde her 30
+        # saniyede yeniden sorgu/log üretme. Servis yeniden başladığında bir
+        # kez daha kontrol edilir; böylece sonradan gelen kayıt da kaçmaz.
+        self._empty_summary_keys = set()
 
     def _get_db(self):
         if self._db_conn is None or self._db_conn.closed:
@@ -149,140 +155,51 @@ class ProductionLogger:
             logger.error(f"log write: {e}"); self._db_conn = None
 
     def _write_shift_summary(self, line_id, shift_code, shift_date=None):
-        """Vardiya özeti hesapla ve yaz — MIN/MAX farkı ile gerçek vardiya üretimi"""
+        """Vardiya özetini ortak OEE hesaplayıcısıyla üret ve yaz."""
+        session = None
         try:
-            db = self._get_db()
-            cur = db.cursor(cursor_factory=RealDictCursor)
+            from models.database import SessionLocal
+
             d = shift_date or date.today()
-
-            # Vardiya sonunda downtime_monitor kesin end_hour ile kapatır. Servis
-            # yeniden başlatma yarışında aktif kayıt henüz kapanmadıysa yanlış
-            # bir özet yazmak yerine sonraki 30 saniyelik turu bekle.
-            cur.execute("""
-                SELECT 1
-                FROM downtimes
-                WHERE line_id=%s AND shift=%s AND started_at::date=%s
-                  AND is_active=TRUE
-                LIMIT 1
-            """, (line_id, shift_code, d))
-            if cur.fetchone():
-                logger.info(
-                    f"[Hat {line_id}] {shift_code} {d} — aktif duruş var, "
-                    "özet ertelendi"
-                )
-                cur.close()
-                return
-
-            # ⚠️ KRİTİK: shift_produced = vardiya boyunca SAYILAN üretim
-            # (max - min), MAX değil. Aksi takdirde önceki vardiyaların birikmiş
-            # sayacı bu vardiyaya saçma rakamlar ekler.
-            cur.execute("""
-                SELECT MIN(logged_at) as first_at,
-                    MAX(logged_at) as last_at,
-                    MAX(produced) - MIN(produced) as shift_produced,
-                    MAX(scrap) - MIN(scrap) as shift_scrap,
-                    MAX(target) as target,
-                    MAX(model_id) as model_id,
-                    AVG(average_cycle) as avg_cycle
-                FROM production_log
-                WHERE line_id=%s AND shift=%s AND logged_at::date=%s
-            """, (line_id, shift_code, d))
-            row = cur.fetchone()
-
-            if not row or not row["shift_produced"] or row["shift_produced"] == 0:
+            session = SessionLocal()
+            result = calculate_shift_summary(
+                session,
+                line_id=line_id,
+                shift_date=d,
+                shift_code=shift_code,
+                require_complete=True,
+            )
+            if result["total_produced"] <= 0:
                 logger.info(f"[Hat {line_id}] {shift_code} {d} — üretim verisi yok, özet atlanıyor")
-                cur.close()
-                return
+                return "no_production"
+            upsert_shift_summary(session, result)
 
-            # Decimal → float/int (psycopg2 numeric tipleri Decimal döndürür)
-            produced = int(row["shift_produced"] or 0)
-            plc_scrap = int(row["shift_scrap"] or 0)   # PLC ham besleme sayacı — sadece referans
-            target = int(row["target"] or 0)
-            avg_cycle = float(row["avg_cycle"] or 0)
-            first_at = row["first_at"]
-            last_at = row["last_at"]
-
-            # ── Gerçek fire: elle girilen scrap_entries (PLC scrap DEĞİL) ──
-            cur.execute("""
-                SELECT COALESCE(SUM(qty), 0) AS s
-                FROM scrap_entries
-                WHERE line_id=%s AND shift=%s AND created_at::date=%s
-            """, (line_id, shift_code, d))
-            scrap = int(cur.fetchone()["s"])
-            good = max(produced - scrap, 0)
-
-            # Duruşları ikiye ayır: OEE-hariç (mola+vardiya sonu → paydadan düşülür)
-            # ve gerçek kayıp (Availability'den düşülür). /summary/now ile aynı mantık.
-            cur.execute("""
-                SELECT
-                  COALESCE(SUM(CASE WHEN r.exclude_from_oee THEN d.duration_sec ELSE 0 END),0) AS excluded_dt,
-                  COALESCE(SUM(CASE WHEN NOT r.exclude_from_oee THEN d.duration_sec ELSE 0 END),0) AS unplanned_dt
-                FROM downtimes d
-                JOIN downtime_reasons r ON d.reason_id = r.reason_id
-                WHERE d.line_id=%s AND d.shift=%s AND d.started_at::date=%s
-                  AND d.is_active=FALSE
-                  AND r.reason_code <> 'VARDIYA_SONU'
-            """, (line_id, shift_code, d))
-            dt_row = cur.fetchone()
-            excluded_dt = int(dt_row["excluded_dt"]) if dt_row else 0
-            unplanned_dt = int(dt_row["unplanned_dt"]) if dt_row else 0
-
-            # ── Planlanan üretim süresi = VARDİYANIN TAM SÜRESİ (vardiya_1 → 10 saat) ──
-            # OEE HER ZAMAN planlanan süreye göre hesaplanır; ilk/son baskı penceresine DEĞİL.
-            # Geç başlama / erken bitiş kaybı ancak böyle yakalanır.
-            # first_at / last_at yalnızca first_cycle_at / last_cycle_at kolonlarında saklanır.
-            # ── Dinamik payda: window (taban) − OEE-hariç süreler (mola+vardiya sonu) ──
-            # Bitmiş vardiya özeti → pencere TAM taban (window_so_far değil).
-            import shift_utils
-            window = shift_utils.planned_seconds(shift_code, line_id=line_id, dt=d)
-            total_time = window                                # raporda gösterilen tam pencere
-
-            planned = max(window - excluded_dt, 60)            # mola paydadan düşülür
-            run_time = max(planned - unplanned_dt, 1)          # çalışma = payda − kayıp duruş
-
-            # OEE
-            availability = min(run_time / planned * 100, 100.0) if planned > 0 else 0
-            # İdeal cycle: hat konfigürasyonundan (OEE standardı), yoksa ölçülen ortalama
-            cur.execute("SELECT ideal_cycle_ds FROM production_lines WHERE line_id=%s", (line_id,))
-            _ic = cur.fetchone()
-            ideal_ds = (_ic["ideal_cycle_ds"] if _ic and _ic["ideal_cycle_ds"] else None) or avg_cycle
-            ideal_sec = (ideal_ds / 10.0) if ideal_ds > 0 else 8.0
-            performance = (produced * ideal_sec / run_time * 100) if run_time > 0 else 0
-            performance = min(performance, 100.0)
-            quality = (good / produced * 100) if produced > 0 else 100
-            oee = availability * performance * quality / 10000
-
-            cur.execute("""
-                INSERT INTO shift_summary
-                    (line_id, shift_date, shift, model_id, target,
-                    total_produced, total_scrap, total_good,
-                    avg_cycle_time, total_downtime_sec, break_sec,
-                    oee_availability, oee_performance, oee_quality, oee_overall,
-                    first_cycle_at, last_cycle_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT (line_id, shift_date, shift) DO UPDATE SET
-                    total_produced=EXCLUDED.total_produced, total_scrap=EXCLUDED.total_scrap,
-                    total_good=EXCLUDED.total_good, avg_cycle_time=EXCLUDED.avg_cycle_time,
-                    total_downtime_sec=EXCLUDED.total_downtime_sec, break_sec=EXCLUDED.break_sec,
-                    oee_availability=EXCLUDED.oee_availability, oee_performance=EXCLUDED.oee_performance,
-                    oee_quality=EXCLUDED.oee_quality, oee_overall=EXCLUDED.oee_overall,
-                    first_cycle_at=EXCLUDED.first_cycle_at, last_cycle_at=EXCLUDED.last_cycle_at
-            """, (line_id, d, shift_code, row["model_id"], target,
-                produced, scrap, good, avg_cycle, unplanned_dt, excluded_dt,
-                round(availability, 1), round(performance, 1),
-                round(quality, 1), round(oee, 1),
-                first_at, last_at))
-            cur.close()
-
+            first_at = result["first_cycle_at"]
+            last_at = result["last_cycle_at"]
             logger.info(
                 f"[Hat {line_id}] Vardiya özeti yazıldı: {shift_code} {d} | "
-                f"Üretim:{produced} Fire:{scrap} Duruş:{unplanned_dt//60}dk Mola:{excluded_dt//60}dk "
+                f"Üretim:{result['total_produced']} Fire:{result['total_scrap']} "
+                f"Duruş:{result['total_downtime_sec']//60}dk "
+                f"Mola:{result['break_sec']//60}dk "
                 f"İlk:{first_at.strftime('%H:%M') if first_at else '?'} "
                 f"Son:{last_at.strftime('%H:%M') if last_at else '?'} "
-                f"OEE:{oee:.1f}%"
+                f"OEE:{result['oee_overall']:.1f}%"
             )
+            return "written"
+        except ActiveDowntimeError:
+            logger.info(
+                f"[Hat {line_id}] {shift_code} {d} — aktif duruş var, "
+                "özet ertelendi"
+            )
+            return "active_downtime"
         except Exception as e:
-            logger.error(f"shift summary: {e}"); self._db_conn = None
+            if session is not None:
+                session.rollback()
+            logger.error(f"shift summary: {e}")
+            return "error"
+        finally:
+            if session is not None:
+                session.close()
 
     # ─── MQTT ──────────────────────────────────
     def _on_connect(self, client, userdata, flags, rc, properties=None):
@@ -433,13 +350,22 @@ class ProductionLogger:
                             if now < summary_at:
                                 continue
                             shift_code = shift["code"]
+                            summary_key = (line_id, shift_date, shift_code)
+                            if summary_key in self._empty_summary_keys:
+                                continue
                             if self._summary_exists(line_id, shift_date, shift_code):
                                 continue
                             logger.info(
                                 f"═══ Vardiya özeti tetiklendi: Hat {line_id} | "
                                 f"{shift_code} | {shift_date} ═══"
                             )
-                            self._write_shift_summary(line_id, shift_code, shift_date)
+                            result = self._write_shift_summary(
+                                line_id,
+                                shift_code,
+                                shift_date,
+                            )
+                            if result == "no_production":
+                                self._empty_summary_keys.add(summary_key)
                         
             except Exception as e:
                 logger.error(f"scheduler loop: {e}")
@@ -492,11 +418,20 @@ class ProductionLogger:
                             continue
                     if self._summary_exists(line_id, check_date, shift_code):
                         continue
+                    summary_key = (line_id, check_date, shift_code)
+                    if summary_key in self._empty_summary_keys:
+                        continue
                     logger.info(
                         f"[CATCH-UP] Eksik vardiya özeti yazılıyor: "
                         f"Hat {line_id} | {shift_code} | {check_date}"
                     )
-                    self._write_shift_summary(line_id, shift_code, check_date)
+                    result = self._write_shift_summary(
+                        line_id,
+                        shift_code,
+                        check_date,
+                    )
+                    if result == "no_production":
+                        self._empty_summary_keys.add(summary_key)
     
     def _handle_oil_data(self, line_id, payload):
         """Yağ verisini DB'ye yaz — değişim eşiği + heartbeat ile"""

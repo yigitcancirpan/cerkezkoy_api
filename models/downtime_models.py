@@ -30,6 +30,8 @@ class DowntimeReason(Base):
     display_order = Column(Integer, default=0)
     is_active     = Column(Boolean, default=True)
     created_at    = Column(DateTime(timezone=True), server_default=func.now())
+    oee_category  = Column(String(30), default="downtime_loss")
+    exclude_from_oee = Column(Boolean, default=False)
 
     # İlişki
     downtimes = relationship("Downtime", back_populates="reason")

@@ -34,7 +34,13 @@ _DEFAULT_DB_URL = os.getenv("DB_URL")
 _TTL = 60.0  # saniye
 
 _lock = threading.Lock()
-_state = {"ts": 0.0, "shifts": [], "excluded": set(), "overrides": []}
+_state = {
+    "ts": 0.0,
+    "shifts": [],
+    "excluded": set(),
+    "overrides": [],
+    "breaks": [],
+}
 _db_url = _DEFAULT_DB_URL
 _conn = None
 
@@ -80,14 +86,24 @@ def _refresh():
         """)
         shifts = [dict(r) for r in cur.fetchall()]
 
-        # Tarihe özel istisnalar (son 60 gün + gelecek) — cache'e alınır
+        # Tarihe özel istisnalar küçük bir tablo olduğu için tamamı alınır.
+        # Geçmiş OEE yeniden hesaplaması eski tarih kurallarını da çözebilmelidir.
         cur.execute("""
             SELECT override_date, code, line_id, label, start_hour, end_hour,
                    latest_end, window_hours, planned_seconds
             FROM shift_overrides
-            WHERE override_date >= CURRENT_DATE - 60
         """)
         _state["overrides"] = [dict(r) for r in cur.fetchall()]
+
+        cur.execute("""
+            SELECT break_id, shift_code, break_code, label,
+                   start_minute, end_minute, line_id, day_of_week,
+                   is_active
+            FROM break_schedules
+            WHERE is_active = TRUE
+            ORDER BY shift_code, start_minute, break_id
+        """)
+        _state["breaks"] = [dict(r) for r in cur.fetchall()]
 
         cur.execute("""
             SELECT reason_code FROM downtime_reasons WHERE exclude_from_oee = TRUE
@@ -193,6 +209,73 @@ def get_excluded_codes(force=False):
     """OEE'den hariç tutulacak reason_code'lar (mola + vardiya sonu)."""
     _ensure(force)
     return set(_state["excluded"])
+
+
+def get_breaks(shift_code: str, line_id=None, dt=None, force=False):
+    """Hat ve güne göre uygulanacak mola pencerelerini çözer.
+
+    Öncelik: hat+gün > genel gün > hat geneli > tamamen genel. Aynı
+    ``break_code`` daha özel bir satırla değiştirilir; diğer molalar korunur.
+    """
+    _ensure(force)
+    d = dt or datetime.now()
+    the_date = d.date() if isinstance(d, datetime) else d
+    pg_dow = (the_date.weekday() + 1) % 7
+    candidates = []
+    for row in _state.get("breaks", []):
+        if row.get("shift_code") != shift_code:
+            continue
+        row_line = row.get("line_id")
+        row_day = row.get("day_of_week")
+        if row_line is not None and row_line != line_id:
+            continue
+        if row_day is not None and row_day != pg_dow:
+            continue
+        # Gün özelliği hat özelliğinden daha yüksek ağırlıktadır.
+        priority = (2 if row_day is not None else 0) + (
+            1 if row_line is not None else 0
+        )
+        candidates.append((priority, row))
+
+    resolved = {}
+    for _priority, row in sorted(candidates, key=lambda item: item[0]):
+        resolved[row["break_code"]] = dict(row)
+    return sorted(
+        resolved.values(),
+        key=lambda row: (row["start_minute"], row["break_code"]),
+    )
+
+
+def break_windows(shift_code: str, shift_date: date, line_id=None, tzinfo=None):
+    """Çözülmüş mola tanımlarını timezone-aware datetime aralıklarına çevirir."""
+    shift = shift_by_code(shift_code, line_id=line_id, dt=shift_date)
+    shift_start = datetime.combine(
+        shift_date,
+        datetime.min.time(),
+        tzinfo=tzinfo,
+    ) + timedelta(hours=int(shift["start_hour"]))
+    shift_end = shift_end_datetime(shift, shift_date, tzinfo)
+    result = []
+    for item in get_breaks(shift_code, line_id=line_id, dt=shift_date):
+        start = datetime.combine(
+            shift_date,
+            datetime.min.time(),
+            tzinfo=tzinfo,
+        ) + timedelta(minutes=int(item["start_minute"]))
+        end = datetime.combine(
+            shift_date,
+            datetime.min.time(),
+            tzinfo=tzinfo,
+        ) + timedelta(minutes=int(item["end_minute"]))
+        if start < shift_start:
+            start += timedelta(days=1)
+        if end <= start:
+            end += timedelta(days=1)
+        start = max(start, shift_start)
+        end = min(end, shift_end)
+        if end > start:
+            result.append((start, end))
+    return result
 
 
 def _in_window(h: int, start: int, end: int) -> bool:

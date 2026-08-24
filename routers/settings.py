@@ -466,3 +466,140 @@ def delete_shift_override(
     db.commit()
     _publish_config_reload()
     return {"message": "Tarihe özel vardiya silindi"}
+
+
+class BreakScheduleUpsert(BaseModel):
+    shift_code: str = Field(min_length=1, max_length=30)
+    break_code: str = Field(min_length=1, max_length=30)
+    label: str = Field(min_length=1, max_length=80)
+    start_minute: int = Field(ge=0, le=1439)
+    end_minute: int = Field(ge=1, le=1440)
+    line_id: Optional[int] = Field(default=None, ge=1)
+    day_of_week: Optional[int] = Field(default=None, ge=0, le=6)
+    is_active: bool = True
+
+
+def _break_values(body: BreakScheduleUpsert, db: Session):
+    if body.end_minute <= body.start_minute:
+        raise HTTPException(422, "Mola bitişi başlangıçtan sonra olmalı")
+    if body.line_id is not None:
+        exists = db.execute(text("""
+            SELECT 1 FROM production_lines WHERE line_id=:lid
+        """), {"lid": body.line_id}).fetchone()
+        if not exists:
+            raise HTTPException(422, "Seçilen üretim hattı bulunamadı")
+    shift_exists = db.execute(text("""
+        SELECT 1 FROM shift_config
+        WHERE code=:code AND is_active=TRUE
+        LIMIT 1
+    """), {"code": body.shift_code}).fetchone()
+    if not shift_exists:
+        raise HTTPException(422, "Aktif vardiya kodu bulunamadı")
+    return {
+        "shift": body.shift_code.strip(),
+        "code": body.break_code.strip().upper(),
+        "label": body.label.strip(),
+        "start": body.start_minute,
+        "end": body.end_minute,
+        "lid": body.line_id,
+        "dow": body.day_of_week,
+        "active": body.is_active,
+    }
+
+
+@router.get("/breaks")
+def get_break_schedules(db: Session = Depends(get_db)):
+    rows = db.execute(text("""
+        SELECT break_id, shift_code, break_code, label,
+               start_minute, end_minute, line_id, day_of_week,
+               is_active, created_at, updated_at
+        FROM break_schedules
+        ORDER BY shift_code, day_of_week NULLS FIRST,
+                 line_id NULLS FIRST, start_minute, break_id
+    """)).fetchall()
+    return [dict(row._mapping) for row in rows]
+
+
+@router.get("/breaks/resolved")
+def get_resolved_breaks(
+    target_date: date = Query(...),
+    shift_code: str = Query(...),
+    line_id: Optional[int] = Query(None, ge=1),
+):
+    import shift_utils
+    return shift_utils.get_breaks(
+        shift_code,
+        line_id=line_id,
+        dt=target_date,
+        force=True,
+    )
+
+
+@router.post("/breaks", status_code=201)
+def create_break_schedule(
+    body: BreakScheduleUpsert,
+    db: Session = Depends(get_db),
+):
+    values = _break_values(body, db)
+    try:
+        row = db.execute(text("""
+            INSERT INTO break_schedules
+                (shift_code, break_code, label, start_minute, end_minute,
+                 line_id, day_of_week, is_active, updated_at)
+            VALUES
+                (:shift,:code,:label,:start,:end,:lid,:dow,:active,NOW())
+            RETURNING break_id
+        """), values).fetchone()
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        if "uq_break_schedule_scope" in str(exc):
+            raise HTTPException(409, "Bu mola kodu seçilen kapsamda zaten var") from exc
+        raise
+    _publish_config_reload()
+    return {"break_id": row[0], "message": "Mola penceresi oluşturuldu"}
+
+
+@router.put("/breaks/{break_id}")
+def update_break_schedule(
+    break_id: int,
+    body: BreakScheduleUpsert,
+    db: Session = Depends(get_db),
+):
+    values = _break_values(body, db)
+    values["id"] = break_id
+    try:
+        row = db.execute(text("""
+            UPDATE break_schedules
+            SET shift_code=:shift, break_code=:code, label=:label,
+                start_minute=:start, end_minute=:end, line_id=:lid,
+                day_of_week=:dow, is_active=:active, updated_at=NOW()
+            WHERE break_id=:id
+            RETURNING break_id
+        """), values).fetchone()
+        if not row:
+            db.rollback()
+            raise HTTPException(404, "Mola penceresi bulunamadı")
+        db.commit()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        if "uq_break_schedule_scope" in str(exc):
+            raise HTTPException(409, "Bu mola kodu seçilen kapsamda zaten var") from exc
+        raise
+    _publish_config_reload()
+    return {"break_id": break_id, "message": "Mola penceresi güncellendi"}
+
+
+@router.delete("/breaks/{break_id}")
+def delete_break_schedule(break_id: int, db: Session = Depends(get_db)):
+    row = db.execute(text("""
+        DELETE FROM break_schedules WHERE break_id=:id RETURNING break_id
+    """), {"id": break_id}).fetchone()
+    if not row:
+        db.rollback()
+        raise HTTPException(404, "Mola penceresi bulunamadı")
+    db.commit()
+    _publish_config_reload()
+    return {"deleted": break_id}

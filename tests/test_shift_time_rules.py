@@ -26,6 +26,7 @@ class ShiftTimeRulesTest(unittest.TestCase):
             "shifts": shift_utils._state["shifts"],
             "excluded": shift_utils._state["excluded"],
             "overrides": shift_utils._state["overrides"],
+            "breaks": shift_utils._state["breaks"],
         }
         shift_utils._state.update({
             "ts": shift_utils.time.time(),
@@ -45,6 +46,29 @@ class ShiftTimeRulesTest(unittest.TestCase):
                 },
             ],
             "overrides": [],
+            "breaks": [
+                {
+                    "break_id": 1, "shift_code": "vardiya_1",
+                    "break_code": "CAY_1", "label": "Çay",
+                    "start_minute": 600, "end_minute": 615,
+                    "line_id": None, "day_of_week": None,
+                    "is_active": True,
+                },
+                {
+                    "break_id": 2, "shift_code": "vardiya_1",
+                    "break_code": "IKINDI", "label": "İkindi",
+                    "start_minute": 900, "end_minute": 915,
+                    "line_id": None, "day_of_week": None,
+                    "is_active": True,
+                },
+                {
+                    "break_id": 3, "shift_code": "vardiya_1",
+                    "break_code": "IKINDI", "label": "Cumartesi İkindi",
+                    "start_minute": 840, "end_minute": 855,
+                    "line_id": None, "day_of_week": 6,
+                    "is_active": True,
+                },
+            ],
         })
 
     def tearDown(self):
@@ -212,6 +236,24 @@ class ShiftTimeRulesTest(unittest.TestCase):
         after = datetime(2026, 8, 23, 0, 1, tzinfo=timezone.utc)
         self.assertEqual(shift_utils.resolve_shift_date(shift, before), date(2026, 8, 21))
         self.assertEqual(shift_utils.resolve_shift_date(shift, after), date(2026, 8, 22))
+
+    def test_saturday_break_overrides_only_same_break_code(self):
+        rows = shift_utils.get_breaks("vardiya_1", dt=date(2026, 8, 22))
+        by_code = {row["break_code"]: row for row in rows}
+        self.assertEqual(set(by_code), {"CAY_1", "IKINDI"})
+        self.assertEqual(by_code["IKINDI"]["start_minute"], 840)
+
+    def test_break_windows_are_clipped_to_resolved_shift(self):
+        tz = timezone(timedelta(hours=3))
+        windows = shift_utils.break_windows(
+            "vardiya_1",
+            date(2026, 8, 22),
+            tzinfo=tz,
+        )
+        self.assertEqual(
+            [(start.hour, start.minute, end.hour, end.minute) for start, end in windows],
+            [(10, 0, 10, 15), (14, 0, 14, 15)],
+        )
 
 
 if __name__ == "__main__":

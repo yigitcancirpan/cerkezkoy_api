@@ -212,6 +212,15 @@
     <table><thead><tr>
       <th>Tarih</th><th>Vardiya</th><th>Kapsam</th><th>Saat</th><th>Özet Saati</th><th>Planlanan</th><th>Not</th><th></th>
     </tr></thead><tbody id="shift-override-rows"></tbody></table>
+
+    <div class="row-between" style="margin-top:34px">
+      <h2>Planlı Mola Pencereleri</h2>
+      <button class="btn" onclick="openBreak(null)">+ Yeni Mola Penceresi</button>
+    </div>
+    <p class="hint"><strong>Mola saati tek başına OEE süresi düşürmez.</strong> Yalnızca bu pencere içindeki gerçek makine duruşu planlı mola sayılır. Üretim mola boyunca devam ederse düşülecek süre sıfırdır; pencerenin dışına taşan duruş bölümü plansız duruş olarak ayrı değerlendirilir.</p>
+    <table><thead><tr>
+      <th>Mola</th><th>Kod</th><th>Vardiya</th><th>Kapsam</th><th>Gün</th><th>Saat</th><th>Durum</th><th></th>
+    </tr></thead><tbody id="break-rows"></tbody></table>
   </div>
   <!-- ── AYARLAR ── -->
   <div class="section" id="sec-settings">
@@ -306,7 +315,7 @@
     <div class="field">
       <label>Planlanan süre — saat (brüt, mola dahil)</label>
       <input type="number" id="s-hours" step="0.25" min="0.25" placeholder="10">
-      <p class="hint" style="margin:6px 0 0">OEE paydası bu süreden hesaplanır. Mola çıkarmayın — otomatik düşülür.</p>
+      <p class="hint" style="margin:6px 0 0">OEE paydası bu brüt süreden başlar. Mola çıkarmayın; yalnızca planlı mola penceresindeki gerçek duruş otomatik düşülür.</p>
     </div>
     <div class="field"><label>Durum</label>
       <select id="s-active"><option value="true">Aktif</option><option value="false">Pasif</option></select>
@@ -348,6 +357,44 @@
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeModal('shift-override-modal')">İptal</button>
       <button class="btn" onclick="saveShiftOverride()">Kaydet</button>
+    </div>
+  </div>
+</div>
+<!-- ── PLANLI MOLA MODALI ── -->
+<div class="overlay" id="break-modal">
+  <div class="modal">
+    <h3 id="break-title">Planlı Mola Penceresi</h3>
+    <input type="hidden" id="b-id">
+    <div class="grid2">
+      <div class="field"><label>Görünen Ad</label><input id="b-label" placeholder="Öğle Molası"></div>
+      <div class="field"><label>Kod</label><input id="b-code" class="code" placeholder="MOLA_YEMEK"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Vardiya</label><select id="b-shift"></select></div>
+      <div class="field"><label>Hat kapsamı</label><select id="b-line"><option value="">Tüm hatlar</option></select></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Başlangıç</label><input type="time" id="b-start" step="60"></div>
+      <div class="field"><label>Bitiş</label><input type="time" id="b-end" step="60"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Uygulandığı gün</label>
+        <select id="b-day">
+          <option value="">Genel</option>
+          <option value="1">Pazartesi</option><option value="2">Salı</option>
+          <option value="3">Çarşamba</option><option value="4">Perşembe</option>
+          <option value="5">Cuma</option><option value="6">Cumartesi</option>
+          <option value="0">Pazar</option>
+        </select>
+      </div>
+      <div class="field"><label>Durum</label>
+        <select id="b-active"><option value="true">Aktif</option><option value="false">Pasif</option></select>
+      </div>
+    </div>
+    <p class="hint">Aynı mola kodunun güne veya hatta özel satırı, genel satırı yalnızca o kapsamda geçersiz kılar.</p>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeModal('break-modal')">İptal</button>
+      <button class="btn" onclick="saveBreak()">Kaydet</button>
     </div>
   </div>
 </div>
@@ -923,6 +970,7 @@ function shiftScopeQuery(s){
 
 let shiftsCache = [];
 let shiftOverridesCache = [];
+let breaksCache = [];
 
 async function loadShifts(){
   const rows = await api('GET', '/api/v1/settings/shifts');
@@ -949,6 +997,7 @@ async function loadShifts(){
     </tr>`;
   }).join('');
   await loadShiftOverrides();
+  await loadBreaks();
 }
 
 function dateText(value){
@@ -1119,6 +1168,107 @@ async function delShiftOverride(index){
     );
     toast('Tarih istisnası silindi');
     loadShiftOverrides();
+  }catch(error){ toast(error.message, false); }
+}
+
+function minuteText(value){
+  const minute = Number(value || 0);
+  return `${String(Math.floor(minute/60)%24).padStart(2,'0')}:${String(minute%60).padStart(2,'0')}`;
+}
+
+function timeToMinute(value){
+  const parts = String(value || '').split(':').map(Number);
+  if(parts.length !== 2 || parts.some(Number.isNaN)) return null;
+  return parts[0]*60 + parts[1];
+}
+
+async function loadBreaks(){
+  const rows = await api('GET', '/api/v1/settings/breaks');
+  breaksCache = rows;
+  const tbody = document.getElementById('break-rows');
+  if(!rows.length){
+    tbody.innerHTML = '<tr><td colspan="8" class="hint">Tanımlı mola penceresi yok.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map((b,index)=>`<tr>
+    <td><strong>${esc(b.label)}</strong></td>
+    <td class="code">${esc(b.break_code)}</td>
+    <td class="code">${esc(b.shift_code)}</td>
+    <td>${b.line_id == null ? 'Tüm hatlar' : `Hat ${b.line_id}`}</td>
+    <td>${b.day_of_week == null ? 'Genel' : esc(SHIFT_DAYS[b.day_of_week])}</td>
+    <td>${minuteText(b.start_minute)} – ${minuteText(b.end_minute)}</td>
+    <td><span class="pill ${b.is_active?'on':'off'}">${b.is_active?'Aktif':'Pasif'}</span></td>
+    <td style="text-align:right; white-space:nowrap">
+      <button class="btn ghost sm" onclick="openBreakByIndex(${index})">Düzenle</button>
+      <button class="btn danger sm" onclick="delBreak(${b.break_id})">Sil</button>
+    </td>
+  </tr>`).join('');
+}
+
+function openBreakByIndex(index){ openBreak(breaksCache[index]); }
+
+async function openBreak(item){
+  const codes = [...new Set(shiftsCache.map(s=>s.code))];
+  if(!codes.length) return toast('Önce vardiya tanımlayın', false);
+  if(!linesCache.length){
+    try{ linesCache = await api('GET', '/api/v1/lines'); }
+    catch(error){ return toast('Hat listesi alınamadı: '+error.message, false); }
+  }
+  document.getElementById('b-shift').innerHTML = codes.map(code=>
+    `<option value="${esc(code)}">${esc(code)}</option>`
+  ).join('');
+  document.getElementById('b-line').innerHTML = `<option value="">Tüm hatlar</option>${linesCache.map(line=>
+    `<option value="${line.line_id}">${esc(line.line_name)} (Hat ${line.line_id})</option>`
+  ).join('')}`;
+  document.getElementById('break-title').textContent = item ? 'Mola Penceresini Düzenle' : 'Yeni Mola Penceresi';
+  document.getElementById('b-id').value = item ? item.break_id : '';
+  document.getElementById('b-label').value = item ? item.label : '';
+  document.getElementById('b-code').value = item ? item.break_code : '';
+  document.getElementById('b-shift').value = item ? item.shift_code : codes[0];
+  document.getElementById('b-line').value = item && item.line_id != null ? String(item.line_id) : '';
+  document.getElementById('b-day').value = item && item.day_of_week != null ? String(item.day_of_week) : '';
+  document.getElementById('b-start').value = item ? minuteText(item.start_minute) : '10:00';
+  document.getElementById('b-end').value = item ? minuteText(item.end_minute) : '10:15';
+  document.getElementById('b-active').value = String(item ? item.is_active : true);
+  document.getElementById('break-modal').classList.add('show');
+}
+
+async function saveBreak(){
+  const id = document.getElementById('b-id').value;
+  const startMinute = timeToMinute(document.getElementById('b-start').value);
+  const endMinute = timeToMinute(document.getElementById('b-end').value);
+  const code = document.getElementById('b-code').value.trim().toUpperCase();
+  const label = document.getElementById('b-label').value.trim();
+  const lineRaw = document.getElementById('b-line').value;
+  const dayRaw = document.getElementById('b-day').value;
+  if(!code || !label) return toast('Mola kodu ve adı gerekli', false);
+  if(startMinute == null || endMinute == null || endMinute <= startMinute)
+    return toast('Mola bitişi başlangıçtan sonra olmalı', false);
+  const body = {
+    shift_code: document.getElementById('b-shift').value,
+    break_code: code,
+    label,
+    start_minute: startMinute,
+    end_minute: endMinute,
+    line_id: lineRaw === '' ? null : parseInt(lineRaw),
+    day_of_week: dayRaw === '' ? null : parseInt(dayRaw),
+    is_active: document.getElementById('b-active').value === 'true',
+  };
+  try{
+    if(id) await api('PUT', `/api/v1/settings/breaks/${id}`, body);
+    else await api('POST', '/api/v1/settings/breaks', body);
+    closeModal('break-modal');
+    toast('Mola penceresi kaydedildi — gerçek duruşla kesiştiğinde uygulanacak');
+    loadBreaks();
+  }catch(error){ toast(error.message, false); }
+}
+
+async function delBreak(id){
+  if(!confirm('Bu mola penceresi silinsin mi? Geçmiş kayıtlar silinmez; yeniden OEE hesabında yeni çizelge kullanılır.')) return;
+  try{
+    await api('DELETE', `/api/v1/settings/breaks/${id}`);
+    toast('Mola penceresi silindi');
+    loadBreaks();
   }catch(error){ toast(error.message, false); }
 }
 

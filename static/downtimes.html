@@ -33,6 +33,11 @@
   .kpi{background:var(--card2);border-radius:8px;padding:12px;}
   .kpi .v{font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;line-height:1.05;}
   .kpi .l{font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-top:4px;}
+  .oee-details{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px;}
+  .oee-detail{background:#ffffff05;border:1px solid var(--border);border-radius:7px;padding:9px 10px;}
+  .oee-detail b{display:block;font-family:'JetBrains Mono',monospace;font-size:13px;margin-top:3px;}
+  .oee-detail span{font-size:9px;color:var(--dim);letter-spacing:.7px;text-transform:uppercase;}
+  @media(max-width:760px){.oee-details{grid-template-columns:repeat(2,1fr);}}
 
   .chart-grid{display:grid;grid-template-columns:3fr 2fr;gap:12px;}
   @media(max-width:880px){.chart-grid{grid-template-columns:1fr;}}
@@ -94,6 +99,28 @@
   <div class="kpi"><div class="v" style="color:var(--amber);" id="kCount">—</div><div class="l">Duruş Adedi</div></div>
   <div class="kpi"><div class="v" style="color:var(--purple);" id="kUnplanned">—</div><div class="l">Plansız Pay</div></div>
   <div class="kpi"><div class="v" style="color:var(--cyan);font-size:15px;" id="kTop">—</div><div class="l">En Çok Süre Yiyen</div></div>
+</div>
+
+<div class="card" id="oeeCard">
+  <div class="card-label">OEE Bileşenleri — süre/adet ağırlıklı <span id="oeeTarget" style="float:right"></span></div>
+  <div class="kpis" style="margin-bottom:0;">
+    <div class="kpi"><div class="v" style="color:var(--green);" id="oeeA">—</div><div class="l">Kullanılabilirlik</div></div>
+    <div class="kpi"><div class="v" style="color:var(--blue);" id="oeeP">—</div><div class="l">Performans</div></div>
+    <div class="kpi"><div class="v" style="color:var(--purple);" id="oeeQ">—</div><div class="l">Kalite</div></div>
+    <div class="kpi"><div class="v" id="oeeO">—</div><div class="l">Genel OEE</div></div>
+  </div>
+  <div class="oee-details">
+    <div class="oee-detail"><span>Planlanan Üretim</span><b id="oeePlanned">—</b></div>
+    <div class="oee-detail"><span>Çalışma Süresi</span><b id="oeeRun">—</b></div>
+    <div class="oee-detail"><span>Plansız Duruş</span><b id="oeeDown">—</b></div>
+    <div class="oee-detail"><span>OEE Dışı / Mola</span><b id="oeeBreak">—</b></div>
+    <div class="oee-detail"><span>Toplam Üretim</span><b id="oeeProduced">—</b></div>
+    <div class="oee-detail"><span>İyi Üretim</span><b id="oeeGood">—</b></div>
+    <div class="oee-detail"><span>Fire</span><b id="oeeScrap">—</b></div>
+    <div class="oee-detail"><span>Vardiya Özeti</span><b id="oeeCount">—</b></div>
+    <div class="oee-detail"><span>Ağırlıklı İdeal Çevrim</span><b id="oeeIdeal">—</b></div>
+    <div class="oee-detail"><span>Teorik Üretim</span><b id="oeeTheoretical">—</b></div>
+  </div>
 </div>
 
 <div class="card chart-card" id="timelineCard" data-chart="timeline" style="display:none;">
@@ -410,7 +437,7 @@ function render(){
 document.getElementById('rangeSeg').addEventListener('click',e=>{
   if(e.target.tagName!=='BUTTON')return;
   document.querySelectorAll('#rangeSeg button').forEach(b=>b.classList.remove('on'));
-  e.target.classList.add('on');rangeDays=+e.target.dataset.d;load();
+  e.target.classList.add('on');rangeDays=+e.target.dataset.d;load();fetchOee();
 });
 document.getElementById('inclShiftEnd').addEventListener('change',e=>{inclShiftEnd=e.target.checked;render();renderTimeline();});
 
@@ -547,7 +574,44 @@ async function fetchQuality(){
   }
 }
 
+async function fetchOee(){
+  let qs=`line_id=${lineId}`;
+  if(urlDate){
+    qs+=`&date_from=${urlDate}&date_to=${urlDate}`;
+    if(urlShift) qs+=`&shift=${encodeURIComponent(urlShift)}`;
+  }else{
+    qs+=`&date_from=${dateNDaysAgo(rangeDays)}&date_to=${todayLocal()}`;
+  }
+  try{
+    const r=await fetch(`${API}/api/v1/production/oee?${qs}`);
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d=await r.json(), o=d.oee||{}, t=d.totals||{};
+    const pct=value=>Number.isFinite(+value)?`%${(+value).toFixed(1)}`:'—';
+    document.getElementById('oeeA').textContent=pct(o.availability);
+    document.getElementById('oeeP').textContent=pct(o.performance);
+    document.getElementById('oeeQ').textContent=pct(o.quality);
+    const overall=document.getElementById('oeeO');
+    overall.textContent=pct(o.overall);
+    overall.style.color=(+o.overall>=+d.oee_target)?'var(--green)':(+o.overall>=60?'var(--amber)':'var(--red)');
+    document.getElementById('oeeTarget').textContent=`Hedef %${d.oee_target}`;
+    document.getElementById('oeePlanned').textContent=fmtDur(t.planned_production_sec||0);
+    document.getElementById('oeeRun').textContent=fmtDur(t.run_time_sec||0);
+    document.getElementById('oeeDown').textContent=fmtDur(t.total_downtime_sec||0);
+    document.getElementById('oeeBreak').textContent=fmtDur(t.break_sec||0);
+    document.getElementById('oeeProduced').textContent=t.total_produced||0;
+    document.getElementById('oeeGood').textContent=t.total_good||0;
+    document.getElementById('oeeScrap').textContent=t.total_scrap||0;
+    document.getElementById('oeeCount').textContent=t.summary_count||0;
+    document.getElementById('oeeIdeal').textContent=(+t.ideal_cycle_sec>0)
+      ? `${(+t.ideal_cycle_sec).toFixed(2)} sn/adet` : '—';
+    document.getElementById('oeeTheoretical').textContent=t.theoretical_output||0;
+  }catch(error){
+    document.getElementById('oeeTarget').textContent=`OEE alınamadı: ${error.message}`;
+  }
+}
+
 load();
+fetchOee();
 fetchQuality();
 </script>
 </body>

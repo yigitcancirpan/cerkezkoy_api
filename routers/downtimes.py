@@ -15,10 +15,11 @@ Endpoint'ler:
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func
+from sqlalchemy import desc
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from pydantic import BaseModel
+from zoneinfo import ZoneInfo
 
 from models.database import get_db
 from models.downtime_models import Downtime, DowntimeReason
@@ -32,6 +33,7 @@ from models.downtime_schemas import (
 )
 
 router = APIRouter(prefix="/api/v1/downtimes", tags=["Duruş Takip"])
+TZ = ZoneInfo("Europe/Istanbul")
 
 
 # ─── YARDIMCI FONKSİYONLAR ────────────────────
@@ -48,6 +50,156 @@ def _format_duration(seconds: int) -> str:
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _close_with_break_segments(
+    db: Session,
+    downtime: Downtime,
+    ended_at: datetime,
+    closing_note: Optional[str] = None,
+):
+    """Kapalı duruşu gerçek mola pencerelerinde ayrı kayıtlara böler."""
+    import shift_utils
+    from services.break_service import split_interval_by_breaks
+
+    started_at = downtime.started_at
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    local_start = started_at.astimezone(TZ)
+    shift_code = downtime.shift or shift_utils.detect_shift_code(
+        local_start,
+        line_id=downtime.line_id,
+    )
+    shift = shift_utils.shift_by_code(
+        shift_code,
+        line_id=downtime.line_id,
+        dt=local_start,
+    )
+    shift_date = shift_utils.shift_date_for_datetime(shift, local_start)
+    windows = shift_utils.break_windows(
+        shift_code,
+        shift_date,
+        line_id=downtime.line_id,
+        tzinfo=TZ,
+    )
+    segments = split_interval_by_breaks(started_at, ended_at, windows)
+    if not segments:
+        segments = [{"start": started_at, "end": ended_at, "is_break": False}]
+    has_break_overlap = any(item["is_break"] for item in segments)
+
+    operator_reason = db.query(DowntimeReason).filter(
+        DowntimeReason.reason_code == "OPERATOR"
+    ).first()
+    if has_break_overlap and not operator_reason:
+        raise HTTPException(500, "OPERATOR mola sebebi tanımlı değil")
+
+    original_reason = downtime.reason
+    original_trigger = downtime.trigger
+    outside_reason = original_reason
+    if original_reason.reason_code == "OPERATOR":
+        outside_reason = db.query(DowntimeReason).filter(
+            DowntimeReason.reason_code == "BELIRLENMEDI"
+        ).first() or original_reason
+
+    base_notes = downtime.notes or ""
+    if closing_note:
+        base_notes += f"\n[Kapanış] {closing_note}"
+    created = []
+    for index, segment in enumerate(segments):
+        reason = operator_reason if segment["is_break"] else outside_reason
+        segment_note = base_notes
+        if has_break_overlap:
+            segment_note += (
+                "\n[Otomatik bölüm] Tanımlı mola penceresi"
+                if segment["is_break"]
+                else "\n[Otomatik bölüm] Mola penceresi dışı"
+            )
+        target = downtime if index == 0 else Downtime(
+            line_id=downtime.line_id,
+            machine_id=downtime.machine_id,
+            operator_name=downtime.operator_name,
+            shift=shift_code,
+            created_at=downtime.created_at,
+        )
+        target.reason_id = reason.reason_id
+        target.started_at = segment["start"]
+        target.ended_at = segment["end"]
+        target.duration_sec = int(
+            (segment["end"] - segment["start"]).total_seconds()
+        )
+        target.notes = segment_note
+        target.is_active = False
+        target.updated_at = _now_utc()
+        target.trigger = "break_window" if segment["is_break"] else original_trigger
+        if index > 0:
+            db.add(target)
+        created.append(target)
+    return created
+
+
+def _classified_segments(downtime: Downtime, ended_at: datetime, operator_reason):
+    """Kayıtlı duruşu analiz için mola/mola-dışı parçalara ayırır."""
+    import shift_utils
+    from services.break_service import split_interval_by_breaks
+
+    started_at = downtime.started_at
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    if ended_at.tzinfo is None:
+        ended_at = ended_at.replace(tzinfo=timezone.utc)
+    local_start = started_at.astimezone(TZ)
+    shift_code = downtime.shift or shift_utils.detect_shift_code(
+        local_start,
+        line_id=downtime.line_id,
+    )
+    shift = shift_utils.shift_by_code(
+        shift_code,
+        line_id=downtime.line_id,
+        dt=local_start,
+    )
+    shift_date = shift_utils.shift_date_for_datetime(shift, local_start)
+    windows = shift_utils.break_windows(
+        shift_code,
+        shift_date,
+        line_id=downtime.line_id,
+        tzinfo=TZ,
+    )
+    raw = split_interval_by_breaks(started_at, ended_at, windows)
+    result = []
+    for index, segment in enumerate(raw):
+        if segment["is_break"]:
+            reason = operator_reason
+            code = reason.reason_code
+            name = reason.reason_name
+            category = "planned"
+            color = reason.color_hex
+        else:
+            reason = downtime.reason
+            code = reason.reason_code
+            name = reason.reason_name
+            color = reason.color_hex
+            category = "planned" if (
+                reason.exclude_from_oee and code != "OPERATOR"
+            ) else "unplanned"
+            if code == "OPERATOR":
+                code = "OPERATOR_EXTRA"
+                name = "Mola Dışı Operatör Duruşu"
+                color = "#F59E0B"
+                category = "unplanned"
+        result.append({
+            "segment_index": index,
+            "reason_code": code,
+            "reason_name": name,
+            "category": category,
+            "color_hex": color,
+            "started_at": segment["start"],
+            "ended_at": segment["end"],
+            "duration_sec": int(
+                (segment["end"] - segment["start"]).total_seconds()
+            ),
+            "is_break_segment": segment["is_break"],
+        })
+    return result
 
 
 # ─── 1) DURUŞ SEBEPLERİ ───────────────────────
@@ -173,13 +325,12 @@ def stop_downtime(
         raise HTTPException(422, "Bitiş zamanı gelecekte olamaz")
 
     duration = int((ended_at - started_at).total_seconds())
-
-    downtime.ended_at = ended_at
-    downtime.duration_sec = duration
-    downtime.is_active = False
-    downtime.updated_at = request_now
-    if req.notes:
-        downtime.notes = (downtime.notes or "") + f"\n[Kapanış] {req.notes}"
+    segments = _close_with_break_segments(
+        db,
+        downtime,
+        ended_at,
+        closing_note=req.notes,
+    )
 
     db.commit()
     db.refresh(downtime)
@@ -192,7 +343,10 @@ def stop_downtime(
         ended_at=downtime.ended_at,
         duration_sec=duration,
         duration_text=_format_duration(duration),
-        message=f"Duruş sonlandırıldı — {_format_duration(duration)}",
+        message=(
+            f"Duruş sonlandırıldı — {_format_duration(duration)}"
+            + (f" ({len(segments)} bölüme ayrıldı)" if len(segments) > 1 else "")
+        ),
     )
 
 
@@ -389,7 +543,8 @@ def downtime_analysis(
 ):
     """
     Sebep bazlı duruş analizi: Pareto (süre), planlı/plansız, günlük trend.
-    Tüm toplama SQL tarafında yapılır — history'nin 500 satır sınırına takılmaz.
+    Kayıtlar tanımlı mola pencerelerinde sanal olarak bölünür; böylece eski
+    birleşik duruşlar da yeni kuralla doğru görünür.
     """
     base = db.query(Downtime).join(
         DowntimeReason, Downtime.reason_id == DowntimeReason.reason_id
@@ -408,50 +563,40 @@ def downtime_analysis(
         dt_to = datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
         base = base.filter(Downtime.started_at < dt_to)
  
-    # ── Sebep bazlı toplam (Pareto) ──
-    reason_rows = base.with_entities(
-        DowntimeReason.reason_code,
-        DowntimeReason.reason_name,
-        DowntimeReason.category,
-        DowntimeReason.color_hex,
-        func.count(Downtime.downtime_id),
-        func.coalesce(func.sum(Downtime.duration_sec), 0),
-    ).group_by(
-        DowntimeReason.reason_code,
-        DowntimeReason.reason_name,
-        DowntimeReason.category,
-        DowntimeReason.color_hex,
-    ).all()
- 
-    reasons = []
-    for code, name, cat, color, cnt, sec in reason_rows:
-        sec = int(sec)
-        cnt = int(cnt)
-        reasons.append({
-            "reason_code": code,
-            "reason_name": name,
-            "category": cat,
-            "color_hex": color,
-            "count": cnt,
-            "total_sec": sec,
-            "avg_sec": int(sec / cnt) if cnt else 0,
-        })
-    reasons.sort(key=lambda x: x["total_sec"], reverse=True)
- 
-    # ── Günlük trend (gün × sebep) ──
-    daily_rows = base.with_entities(
-        func.date(Downtime.started_at),
-        DowntimeReason.reason_code,
-        func.coalesce(func.sum(Downtime.duration_sec), 0),
-    ).group_by(
-        func.date(Downtime.started_at),
-        DowntimeReason.reason_code,
-    ).all()
- 
+    operator_reason = db.query(DowntimeReason).filter(
+        DowntimeReason.reason_code == "OPERATOR"
+    ).first()
+    if not operator_reason:
+        raise HTTPException(500, "OPERATOR mola sebebi tanımlı değil")
+
+    reason_map = {}
     daily_map = {}
-    for d, code, sec in daily_rows:
-        ds = str(d)
-        daily_map.setdefault(ds, {})[code] = int(sec)
+    for downtime in base.order_by(Downtime.started_at).all():
+        for segment in _classified_segments(
+            downtime,
+            downtime.ended_at,
+            operator_reason,
+        ):
+            code = segment["reason_code"]
+            item = reason_map.setdefault(code, {
+                "reason_code": code,
+                "reason_name": segment["reason_name"],
+                "category": segment["category"],
+                "color_hex": segment["color_hex"],
+                "count": 0,
+                "total_sec": 0,
+            })
+            item["count"] += 1
+            item["total_sec"] += segment["duration_sec"]
+            day = str(segment["started_at"].astimezone(TZ).date())
+            daily_map.setdefault(day, {}).setdefault(code, 0)
+            daily_map[day][code] += segment["duration_sec"]
+
+    reasons = list(reason_map.values())
+    for item in reasons:
+        item["avg_sec"] = int(item["total_sec"] / item["count"])
+    reasons.sort(key=lambda item: item["total_sec"], reverse=True)
+
     daily = [
         {"date": ds, "reasons": daily_map[ds], "total_sec": sum(daily_map[ds].values())}
         for ds in sorted(daily_map.keys())
@@ -459,7 +604,9 @@ def downtime_analysis(
  
     total_sec = sum(r["total_sec"] for r in reasons)
     total_cnt = sum(r["count"] for r in reasons)
-    planned_sec = sum(r["total_sec"] for r in reasons if r["category"] == "planned")
+    planned_sec = sum(
+        r["total_sec"] for r in reasons if r["category"] == "planned"
+    )
  
     return {
         "filters": {"line_id": line_id, "date_from": date_from, "date_to": date_to, "shift": shift},
@@ -503,33 +650,38 @@ def downtime_timeline(
 
     rows = q.order_by(Downtime.started_at).all()
     now = _now_utc()
+    operator_reason = db.query(DowntimeReason).filter(
+        DowntimeReason.reason_code == "OPERATOR"
+    ).first()
+    if not operator_reason:
+        raise HTTPException(500, "OPERATOR mola sebebi tanımlı değil")
 
     events = []
     for d in rows:
         if d.ended_at is None:
             ended = now
-            dur = int((now - d.started_at).total_seconds())
             active = True
         else:
             ended = d.ended_at
-            dur = d.duration_sec if d.duration_sec is not None \
-                else int((ended - d.started_at).total_seconds())
             active = False
-
-        events.append({
-            "downtime_id": d.downtime_id,
-            "reason_code": d.reason.reason_code,
-            "reason_name": d.reason.reason_name,
-            "category": d.reason.category,
-            "color_hex": d.reason.color_hex,
-            "shift": d.shift,
-            "operator_name": d.operator_name,
-            "started_at": d.started_at,   # FastAPI ISO+offset olarak serialize eder
-            "ended_at": ended,
-            "duration_sec": dur,
-            "is_active": active,
-            "notes": d.notes,
-        })
+        segments = _classified_segments(d, ended, operator_reason)
+        for index, segment in enumerate(segments):
+            events.append({
+                "downtime_id": d.downtime_id,
+                "segment_key": f"{d.downtime_id}:{index}",
+                "reason_code": segment["reason_code"],
+                "reason_name": segment["reason_name"],
+                "category": segment["category"],
+                "color_hex": segment["color_hex"],
+                "shift": d.shift,
+                "operator_name": d.operator_name,
+                "started_at": segment["started_at"],
+                "ended_at": segment["ended_at"],
+                "duration_sec": segment["duration_sec"],
+                "is_active": active and index == len(segments) - 1,
+                "is_break_segment": segment["is_break_segment"],
+                "notes": d.notes,
+            })
 
     return {
         "filters": {"line_id": line_id, "date_from": date_from, "date_to": date_to, "shift": shift},
@@ -541,12 +693,14 @@ def downtime_timeline(
 # ════════════════════════════════════════════════
 
 # Monitor + SQL bu kodları STRING olarak eşleştiriyor → kod kilitli, pasifleştirilemez
-PROTECTED_DOWNTIME_CODES = {"BELIRLENMEDI", "VARDIYA_SONU", "BOSALTMA"}
+PROTECTED_DOWNTIME_CODES = {
+    "BELIRLENMEDI", "VARDIYA_SONU", "BOSALTMA", "OPERATOR",
+}
 
 
-def _shift_for(dt: datetime) -> str:
-    h = dt.astimezone().hour
-    return "vardiya_1" if 8 <= h < 18 else "vardiya_2"
+def _shift_for(dt: datetime, line_id: int) -> str:
+    import shift_utils
+    return shift_utils.detect_shift_code(dt.astimezone(TZ), line_id=line_id)
 
 
 class ReasonUpdate(BaseModel):
@@ -634,7 +788,7 @@ def create_manual_downtime(req: ManualDowntime, db: Session = Depends(get_db)):
     start = req.started_at
     if start.tzinfo is None:
         start = start.replace(tzinfo=timezone.utc)
-    shift = req.shift or _shift_for(start)
+    shift = req.shift or _shift_for(start, req.line_id)
     note = (req.notes or "") + " [manuel kayıt]"
 
     if req.ended_at is not None:
@@ -646,10 +800,11 @@ def create_manual_downtime(req: ManualDowntime, db: Session = Depends(get_db)):
         d = Downtime(
             line_id=req.line_id, reason_id=req.reason_id, shift=shift,
             operator_name=req.operator_name, notes=note,
-            started_at=start, ended_at=end,
-            duration_sec=int((end - start).total_seconds()),
-            is_active=False, trigger="manual",
+            started_at=start, is_active=True, trigger="manual",
         )
+        db.add(d)
+        db.flush()
+        segments = _close_with_break_segments(db, d, end)
     else:
         if db.query(Downtime).filter(Downtime.line_id == req.line_id,
                                      Downtime.is_active == True).first():
@@ -659,8 +814,13 @@ def create_manual_downtime(req: ManualDowntime, db: Session = Depends(get_db)):
             operator_name=req.operator_name, notes=note,
             started_at=start, is_active=True, trigger="manual",
         )
-    db.add(d); db.commit(); db.refresh(d)
-    return {"downtime_id": d.downtime_id, "message": "Manuel duruş eklendi"}
+        db.add(d)
+    db.commit(); db.refresh(d)
+    return {
+        "downtime_id": d.downtime_id,
+        "segment_count": len(segments) if req.ended_at is not None else 1,
+        "message": "Manuel duruş eklendi",
+    }
 
 
 @router.delete("/{downtime_id}")
