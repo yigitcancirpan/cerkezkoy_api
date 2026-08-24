@@ -190,7 +190,7 @@ function fmtDur(sec){sec=Math.round(sec);if(sec<60)return sec+' sn';const m=Math
 function fmtDM(iso){if(!iso)return '';const d=new Date(iso+'T00:00:00');return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`;}
 function csvColor(c){return c||'var(--dim)';}
 const _p = new URLSearchParams(location.search);
-const LID = parseInt(_p.get('line_id') || _p.get('line') || '1');
+const LID = parseInt(_p.get('line_id') || _p.get('line'));
 (async () => {
   document.getElementById('dashLink').href = `/static/dashboard.html?line=${LID}`;
   try {
@@ -345,7 +345,7 @@ document.querySelectorAll('.chart-card').forEach(c=>c.addEventListener('click',(
 const params=new URLSearchParams(location.search);
 const urlDate=params.get('date');
 const urlShift=params.get('shift');
-const lineId=params.get('line_id')||1;
+const lineId=LID;
 const urlProduced=params.get('produced');
 const urlScrap=params.get('scrap');
 let rangeDays=15;

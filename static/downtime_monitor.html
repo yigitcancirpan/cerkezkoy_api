@@ -272,10 +272,11 @@ function toggleConfig(){
 }
 let CONFIG = getConfig();
 // URL'de ?line=N varsa localStorage'ı geçersiz kıl (dashboard'dan hat bağlamıyla gelince)
-const urlLine = parseInt(new URLSearchParams(location.search).get('line'));
+const _lineParams = new URLSearchParams(location.search);
+const urlLine = parseInt(_lineParams.get('line') || _lineParams.get('line_id'));
 if (urlLine) CONFIG.lineId = urlLine;
 document.getElementById('lineBadge').textContent = CONFIG.lineName;
-const LID = parseInt(new URLSearchParams(location.search).get('line') || '1');
+const LID = urlLine;
 (async () => {
   document.getElementById('dashLink').href = `/static/dashboard.html?line=${LID}`;
   try {

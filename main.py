@@ -1,12 +1,14 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import settings
 from models.database import engine, Base
 from models.downtime_models import Downtime, DowntimeReason
 from services.mqtt_service import mqtt_service
+from services.static_page_guard import line_context_redirect_url
 from routers import sensors, machines, alerts, batch_transfer, websocket_router, assignments, lines
 from routers import downtimes, production, health, oil, scrap, reports, settings as settings_router
 
@@ -51,6 +53,12 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.middleware("http")
 async def static_no_cache(request, call_next):
+    redirect_url = line_context_redirect_url(request.url.path, request.query_params)
+    if redirect_url:
+        response = RedirectResponse(url=redirect_url, status_code=302)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
     response = await call_next(request)
     if request.url.path.startswith("/static"):
         response.headers["Cache-Control"] = "no-cache"

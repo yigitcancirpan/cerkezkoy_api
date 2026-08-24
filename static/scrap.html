@@ -253,7 +253,7 @@ document.querySelectorAll('.chart-card').forEach(c=>c.addEventListener('click',(
 /* ─── veri ─── */
 const params=new URLSearchParams(location.search);
 const urlDate=params.get('date'); const urlShift=params.get('shift');
-const lineId=params.get('line_id')||params.get('line')||1;   // dashboard ?line= ile geliyor
+const lineId=parseInt(params.get('line_id')||params.get('line')); // dashboard ?line= ile geliyor
 let LINE_NAME='';
 document.getElementById('dashLink').href = `/static/dashboard.html?line=${lineId}`;
 (async () => {

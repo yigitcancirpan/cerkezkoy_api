@@ -239,7 +239,8 @@
 
 <script>
 const API = window.location.origin;
-const LID = parseInt(new URLSearchParams(location.search).get('line') || '1');
+const _lineParams = new URLSearchParams(location.search);
+const LID = parseInt(_lineParams.get('line') || _lineParams.get('line_id'));
 // Tüm sayfa linklerine hattı taşı
 [['scrapLink','scrap.html'], ['setupLink','setup.html'], ['adminLink','admin.html'],
  ['analyticsLink','analytics.html'], ['downtimeLink','downtime_monitor.html']

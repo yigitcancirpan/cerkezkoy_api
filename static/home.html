@@ -66,6 +66,11 @@
     background:#2a1215; border:1px solid #7f1d1d; border-radius:8px;
     color:#fca5a5; font-size:13px; display:none;
   }
+  .notice{
+    max-width:1100px; margin:0 auto 16px; padding:12px 14px;
+    background:#2b210d; border:1px solid #92400e; border-radius:8px;
+    color:#fcd34d; font-size:14px; display:none;
+  }
   @media (max-width:640px){
     body{padding:12px}
     td,thead th{padding:10px}
@@ -78,6 +83,8 @@
   <h1>TORA MAKİNA <span>· Çerkezköy Üretim Hatları</span></h1>
   <div id="clock">--:--:--</div>
 </header>
+
+<div class="notice" id="lineNotice"></div>
 
 <div class="wrap">
   <table>
@@ -99,6 +106,21 @@
 /* ═══════════ KONFİGÜRASYON — projene göre burayı düzenle ═══════════ */
 const API = window.location.origin;
 let LINES = null;
+
+const noticeParams = new URLSearchParams(location.search);
+if (noticeParams.get('notice') === 'line_required') {
+  const pageNames = {
+    admin: 'Yönetim', analytics: 'Analiz', dashboard: 'Dashboard',
+    downtime_monitor: 'Duruş Monitorü', downtimes: 'Duruş Analizi',
+    scrap: 'Fire', setup: 'Atama'
+  };
+  const requested = noticeParams.get('requested');
+  const pageName = pageNames[requested] || 'İstenen sayfa';
+  const notice = document.getElementById('lineNotice');
+  notice.textContent = `${pageName} hat seçilmeden açılamaz. Lütfen aşağıdan bir üretim hattı seçin.`;
+  notice.style.display = 'block';
+  history.replaceState(null, '', '/static/home.html');
+}
 
 const PROD_EP = id => `${API}/api/v1/production/current/${id}`;
 // production/current yanıtında malzeme bilgisi yoksa atama endpoint'ini aç:

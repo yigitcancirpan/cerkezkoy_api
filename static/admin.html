@@ -478,8 +478,9 @@
 
 <script>
 const API = window.location.origin;
-const LINE = parseInt(new URLSearchParams(location.search).get('line') || '1');
-const LID = parseInt(new URLSearchParams(location.search).get('line') || '1');
+const _lineParams = new URLSearchParams(location.search);
+const LINE = parseInt(_lineParams.get('line') || _lineParams.get('line_id'));
+const LID = LINE;
 (async () => {
   document.getElementById('dashLink').href = `/static/dashboard.html?line=${LID}`;
   try {

@@ -149,7 +149,8 @@
 
 <script>
 const API = '';           // aynı origin — dashboard.html ile aynı kullanım
-const LID = parseInt(new URLSearchParams(location.search).get('line') || '1');
+const _lineParams = new URLSearchParams(location.search);
+const LID = parseInt(_lineParams.get('line') || _lineParams.get('line_id'));
 (async () => {
   document.getElementById('dashLink').href = `/static/dashboard.html?line=${LID}`;
   try {
