@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS scrap_entries (
     line_id       INT          NOT NULL,
     reason_id     INT          NOT NULL REFERENCES scrap_reasons(reason_id),
     qty           INT          NOT NULL CHECK (qty > 0),
-    shift         VARCHAR(20),
+    production_date DATE       NOT NULL DEFAULT CURRENT_DATE,
+    shift         VARCHAR(20)  NOT NULL,
     operator_name VARCHAR(80),
     notes         TEXT,
     source        VARCHAR(20)  DEFAULT 'terminal',  -- terminal / dashboard
@@ -33,6 +34,8 @@ CREATE TABLE IF NOT EXISTS scrap_entries (
 );
 
 CREATE INDEX IF NOT EXISTS idx_scrap_entries_line_date ON scrap_entries (line_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_scrap_entries_production
+    ON scrap_entries (line_id, production_date, shift);
 CREATE INDEX IF NOT EXISTS idx_scrap_entries_reason    ON scrap_entries (reason_id);
 
 -- ── Pres üretimine uygun fire sebepleri (istediğin gibi düzenle) ──

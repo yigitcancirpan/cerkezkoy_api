@@ -346,12 +346,12 @@ def calculate_shift_summary(
         SELECT COALESCE(SUM(qty), 0)
         FROM scrap_entries
         WHERE line_id=:lid
-          AND created_at >= :start_at
-          AND created_at < :end_at
+          AND production_date=:shift_date
+          AND shift=:shift
     """), {
         "lid": line_id,
-        "start_at": start_at,
-        "end_at": effective_end,
+        "shift_date": shift_date,
+        "shift": shift_code,
     }).fetchone()
     scrap = int(scrap_row[0] if scrap_row else 0)
 

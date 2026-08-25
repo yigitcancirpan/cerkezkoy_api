@@ -22,6 +22,21 @@
   .seg button{background:var(--card2);color:var(--dim);border:none;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;}
   .seg button.on{background:var(--blue);color:white;}
 
+  .retro-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:12px;}
+  .retro-title{font-size:15px;font-weight:800;}
+  .retro-help{font-size:11px;color:var(--dim);max-width:760px;line-height:1.45;}
+  .retro-form{display:grid;grid-template-columns:150px 180px minmax(180px,1fr) 100px minmax(180px,1.2fr) auto;gap:8px;align-items:end;}
+  .retro-field{display:flex;flex-direction:column;gap:5px;min-width:0;}
+  .retro-field label{font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;}
+  .retro-field input,.retro-field select{width:100%;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:9px;font-family:'DM Sans',sans-serif;font-size:12px;}
+  .retro-submit{border:0;border-radius:7px;padding:10px 14px;background:var(--red);color:white;font-weight:800;cursor:pointer;white-space:nowrap;}
+  .retro-submit:disabled{opacity:.55;cursor:wait;}
+  .retro-msg{font-size:12px;min-height:18px;margin:10px 0 4px;color:var(--dim);}
+  .retro-msg.ok{color:var(--green);}.retro-msg.err{color:var(--red);}
+  .retro-delete{border:1px solid #ef444455;background:#ef444415;color:var(--red);border-radius:6px;padding:5px 8px;cursor:pointer;font-size:11px;font-weight:700;}
+  @media(max-width:1050px){.retro-form{grid-template-columns:repeat(2,minmax(0,1fr));}.retro-submit{grid-column:1/-1;}}
+  @media(max-width:620px){.retro-form{grid-template-columns:1fr;}.retro-submit{grid-column:auto;}}
+
   .card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:12px;}
   .card-label{font-size:9px;letter-spacing:1.5px;color:var(--dim);text-transform:uppercase;margin-bottom:10px;}
 
@@ -87,6 +102,30 @@
   </label>
 </div>
 
+<div class="card" id="retroCard">
+  <div class="retro-head">
+    <div>
+      <div class="retro-title">Geçmiş Fire Girişi</div>
+      <div class="retro-help">Bugün ve son 7 güne fire eklenebilir. Geçmiş vardiya özeti varsa kalite ve OEE aynı kayıt işlemi içinde otomatik yeniden hesaplanır.</div>
+    </div>
+  </div>
+  <div class="retro-form">
+    <div class="retro-field"><label>Üretim tarihi</label><input type="date" id="retroDate"></div>
+    <div class="retro-field"><label>Vardiya</label><select id="retroShift"></select></div>
+    <div class="retro-field"><label>Fire sebebi</label><select id="retroReason"></select></div>
+    <div class="retro-field"><label>Adet</label><input type="number" id="retroQty" min="1" step="1" value="1"></div>
+    <div class="retro-field"><label>Not (opsiyonel)</label><input type="text" id="retroNotes" maxlength="250" placeholder="Açıklama"></div>
+    <button class="retro-submit" id="retroSubmit" type="button">Kaydet ve Özeti Yenile</button>
+  </div>
+  <div class="retro-msg" id="retroMessage"></div>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Üretim Tarihi</th><th>Vardiya</th><th>Sebep</th><th>Adet</th><th>Not</th><th>Giriş Zamanı</th><th></th></tr></thead>
+      <tbody id="retroRows"><tr><td colspan="7" class="empty">Kayıtlar yükleniyor...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
 <div class="kpis">
   <div class="kpi"><div class="v" style="color:var(--green);" id="kProduced">—</div><div class="l">Toplam Üretim (adet)</div></div>
   <div class="kpi"><div class="v" style="color:var(--red);" id="kTotal">—</div><div class="l">Toplam Fire (adet)</div></div>
@@ -138,6 +177,7 @@ function emptyMsg(c,m){clear(c);const d=document.createElement('div');d.classNam
 function tipPosition(tip,container,e){const r=container.getBoundingClientRect();let l=e.clientX-r.left+14,t=e.clientY-r.top+14;const tw=tip.offsetWidth,th=tip.offsetHeight;if(l+tw>r.width)l=e.clientX-r.left-tw-14;if(l<0)l=4;if(t+th>r.height)t=Math.max(4,r.height-th-6);tip.style.left=l+'px';tip.style.top=t+'px';}
 function fmtDM(iso){if(!iso)return '';const d=new Date(iso+'T00:00:00');return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`;}
 function csvColor(c){return c||'var(--dim)';}
+function escapeHtml(value){return String(value??'').replace(/[&<>'"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));}
 
 const CAT={quality:{name:'Kalite',color:'#ef4444'},setup:{name:'Ayar',color:'#3b82f6'},material:{name:'Malzeme',color:'#06b6d4'},other:{name:'Diğer',color:'#64748b'}};
 function catInfo(c){return CAT[c]||{name:c||'—',color:'#64748b'};}
@@ -275,6 +315,97 @@ const SHIFT_LABEL={vardiya_1:'1. Vardiya',vardiya_2:'2. Vardiya',vardiya_3:'3. V
 function dateNDaysAgo(n){const d=new Date();d.setDate(d.getDate()-n);return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);}
 function todayLocal(){const n=new Date();return new Date(n.getTime()-n.getTimezoneOffset()*60000).toISOString().slice(0,10);}
 
+const retroDateEl=document.getElementById('retroDate');
+const retroShiftEl=document.getElementById('retroShift');
+const retroReasonEl=document.getElementById('retroReason');
+const retroQtyEl=document.getElementById('retroQty');
+const retroNotesEl=document.getElementById('retroNotes');
+const retroSubmitEl=document.getElementById('retroSubmit');
+const retroMessageEl=document.getElementById('retroMessage');
+retroDateEl.value=urlDate||todayLocal();
+
+async function apiJson(url,options){
+  const response=await fetch(url,options);
+  let data=null;try{data=await response.json();}catch(e){}
+  if(!response.ok)throw new Error((data&&data.detail)||`HTTP ${response.status}`);
+  return data;
+}
+function retroMessage(text,type=''){
+  retroMessageEl.textContent=text||'';
+  retroMessageEl.className=`retro-msg ${type}`.trim();
+}
+async function loadRetroOptions(resetOnRangeError=true){
+  try{
+    const target=retroDateEl.value||todayLocal();
+    const [options,reasons]=await Promise.all([
+      apiJson(`${API}/api/v1/scrap/entry-options?line_id=${lineId}&target_date=${target}`),
+      apiJson(`${API}/api/v1/scrap/reasons`),
+    ]);
+    retroDateEl.min=options.min_date;retroDateEl.max=options.max_date;
+    const previous=retroShiftEl.value;
+    retroShiftEl.innerHTML=options.shifts.map(s=>`<option value="${escapeHtml(s.code)}">${escapeHtml(s.label)} (${String(s.start_hour).padStart(2,'0')}:00–${String(s.end_hour).padStart(2,'0')}:00)</option>`).join('');
+    if(options.shifts.some(s=>s.code===previous))retroShiftEl.value=previous;
+    else if(urlShift&&options.shifts.some(s=>s.code===urlShift))retroShiftEl.value=urlShift;
+    retroReasonEl.innerHTML=reasons.map(r=>`<option value="${r.reason_id}">${escapeHtml(r.reason_name)}</option>`).join('');
+    await loadRetroEntries();
+  }catch(error){
+    if(resetOnRangeError&&retroDateEl.value!==todayLocal()){
+      retroDateEl.value=todayLocal();
+      return loadRetroOptions(false);
+    }
+    retroMessage(error.message,'err');
+  }
+}
+async function loadRetroEntries(){
+  const target=retroDateEl.value,shift=retroShiftEl.value;
+  if(!target||!shift)return;
+  const data=await apiJson(`${API}/api/v1/scrap/history?line_id=${lineId}&date_from=${target}&date_to=${target}&shift=${encodeURIComponent(shift)}&limit=100`);
+  const rows=data.items||[],tbody=document.getElementById('retroRows');
+  if(!rows.length){tbody.innerHTML='<tr><td colspan="7" class="empty">Bu vardiyada fire kaydı yok</td></tr>';return;}
+  tbody.innerHTML=rows.map(item=>`<tr>
+    <td class="mono">${escapeHtml(item.production_date)}</td>
+    <td>${escapeHtml(SHIFT_LABEL[item.shift]||item.shift)}</td>
+    <td>${escapeHtml(item.reason_name)}</td>
+    <td class="mono" style="color:var(--red);font-weight:700;">${item.qty}</td>
+    <td>${escapeHtml(item.notes||'—')}</td>
+    <td class="mono" style="color:var(--dim);">${escapeHtml(new Date(item.created_at).toLocaleString('tr-TR'))}</td>
+    <td><button class="retro-delete" onclick="deleteRetroScrap(${item.id})">Sil</button></td>
+  </tr>`).join('');
+}
+async function saveRetroScrap(){
+  const qty=Number(retroQtyEl.value);
+  if(!Number.isInteger(qty)||qty<=0){retroMessage('Adet 0’dan büyük tam sayı olmalı','err');return;}
+  retroSubmitEl.disabled=true;retroMessage('Fire kaydediliyor ve özet kontrol ediliyor...');
+  try{
+    const data=await apiJson(`${API}/api/v1/scrap/entry`,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({line_id:lineId,reason_id:Number(retroReasonEl.value),qty,
+        production_date:retroDateEl.value,shift:retroShiftEl.value,
+        notes:retroNotesEl.value.trim()||null,source:'historical'}),
+    });
+    retroQtyEl.value=1;retroNotesEl.value='';
+    const suffix=data.summary_recalculated
+      ? ` Özet yenilendi: kalite %${data.summary.oee_quality}, OEE %${data.summary.oee_overall}.`
+      : ' Bu tarih için tamamlanmış vardiya özeti bulunmadığından yalnızca fire kaydı oluşturuldu.';
+    retroMessage(data.message+suffix,'ok');
+    singleDate=retroDateEl.value;document.getElementById('dayPick').value=singleDate;
+    document.querySelectorAll('#rangeSeg button').forEach(b=>b.classList.remove('on'));
+    await Promise.all([loadRetroEntries(),load()]);
+  }catch(error){retroMessage(error.message,'err');}
+  finally{retroSubmitEl.disabled=false;}
+}
+async function deleteRetroScrap(id){
+  if(!confirm('Bu fire kaydı silinsin mi? İlgili vardiya özeti yeniden hesaplanacaktır.'))return;
+  try{
+    const data=await apiJson(`${API}/api/v1/scrap/entry/${id}`,{method:'DELETE'});
+    retroMessage(data.summary_recalculated?'Kayıt silindi ve vardiya özeti yenilendi.':'Kayıt silindi.','ok');
+    await Promise.all([loadRetroEntries(),load()]);
+  }catch(error){retroMessage(error.message,'err');}
+}
+retroSubmitEl.addEventListener('click',saveRetroScrap);
+retroDateEl.addEventListener('change',()=>loadRetroOptions(false));
+retroShiftEl.addEventListener('change',loadRetroEntries);
+
 function currentRange(){
   if(urlDate) return {from:urlDate,to:urlDate};
   if(singleDate) return {from:singleDate,to:singleDate};
@@ -387,6 +518,7 @@ if(dayPickEl) dayPickEl.addEventListener('change',e=>{
 });
 
 load();
+loadRetroOptions();
 </script>
 </body>
 </html>
