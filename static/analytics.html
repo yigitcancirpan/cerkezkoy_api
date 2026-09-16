@@ -16,7 +16,7 @@
   .back{padding:6px 12px;border-radius:6px;font-size:11px;font-weight:700;background:var(--card2);color:var(--dim);text-decoration:none;border:1px solid var(--border);}
   .back:hover{color:var(--text);}
 
-  .tabs{display:flex;gap:6px;margin-bottom:14px;}
+  .tabs{display:flex;gap:6px;margin-bottom:14px;overflow-x:auto;}
   .tab{padding:9px 18px;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;background:var(--card);border:1px solid var(--border);color:var(--dim);}
   .tab.active{background:var(--card2);color:var(--text);border-color:var(--blue);}
   .panel{display:none;}
@@ -44,6 +44,38 @@
   .kpi{background:var(--card2);border-radius:8px;padding:12px;}
   .kpi .v{font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;line-height:1;}
   .kpi .l{font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-top:4px;}
+  .kpi .s{font-size:10px;color:var(--dim);margin-top:7px;line-height:1.35;}
+
+  .downtime-controls{display:flex;gap:10px;align-items:end;flex-wrap:wrap;}
+  .downtime-controls label{display:flex;flex-direction:column;gap:5px;font-size:10px;color:var(--dim);}
+  .downtime-controls select{background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:7px 9px;}
+  .downtime-controls button{background:var(--blue);color:white;border:1px solid var(--blue);border-radius:7px;padding:8px 14px;font-size:11px;font-weight:700;cursor:pointer;}
+  .downtime-kpis{grid-template-columns:repeat(6,1fr);}
+  .downtime-kpis .v{font-size:20px;overflow-wrap:anywhere;}
+  .downtime-note{color:var(--dim);font-size:10px;line-height:1.45;margin-top:10px;}
+  .reason-head{display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap;margin-bottom:12px;}
+  .reason-head label{display:flex;flex-direction:column;gap:5px;font-size:10px;color:var(--dim);}
+  .reason-head select{min-width:min(440px,80vw);background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:8px 10px;}
+  .reason-kpis{margin-bottom:0;}
+  .downtime-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(420px,1fr);gap:12px;}
+  .downtime-grid>*{min-width:0;}
+  .downtime-table-wrap{overflow:auto;max-width:100%;max-height:500px;}
+  .downtime-table{width:100%;border-collapse:collapse;font-size:11px;}
+  .downtime-table th,.downtime-table td{padding:9px 8px;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap;}
+  .downtime-table th{position:sticky;top:0;background:var(--card);z-index:1;font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;}
+  .downtime-table tbody tr{cursor:pointer;}
+  .downtime-table tbody tr:hover,.downtime-table tbody tr.selected{background:#1e293b;}
+  .reason-name-cell{display:flex;align-items:center;gap:7px;white-space:normal;min-width:180px;}
+  .reason-dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto;}
+  .category-badge{display:inline-block;border-radius:10px;padding:2px 7px;font-size:9px;background:#263044;color:var(--dim);}
+  .daily-bars{display:flex;flex-direction:column;gap:9px;min-height:220px;max-height:500px;overflow:auto;padding-right:4px;}
+  .daily-row{display:grid;grid-template-columns:62px 1fr 74px;gap:9px;align-items:center;font:10px 'JetBrains Mono',monospace;}
+  .daily-date,.daily-value{color:var(--dim);}
+  .daily-value{text-align:right;color:var(--text);}
+  .daily-track{height:14px;background:var(--card2);border-radius:5px;overflow:hidden;}
+  .daily-fill{height:100%;min-width:0;border-radius:5px;transition:width .2s;}
+  @media(max-width:1100px){.downtime-kpis{grid-template-columns:repeat(3,1fr)}.downtime-grid{grid-template-columns:1fr;}}
+  @media(max-width:620px){.tab{padding:9px 12px;white-space:nowrap}.downtime-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.downtime-kpis .kpi{min-width:0}.daily-row{grid-template-columns:54px minmax(0,1fr) 68px}.reason-head select{min-width:0;width:100%;}.reason-head label{width:100%;}}
 
   /* Grafikler küçük — 2 sütun, tıklayınca büyür */
   .chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
@@ -75,6 +107,7 @@
   .footer{text-align:center;color:var(--dim);font-size:10px;margin-top:10px;}
 </style>
 <script src="/static/material_reporting.js?v=1.08a" defer></script>
+<script src="/static/downtime_history.js?v=1.08b" defer></script>
 </head>
 <body>
 
@@ -85,6 +118,7 @@
 
 <div class="tabs">
   <div class="tab active" data-tab="prod" onclick="switchTab('prod')">Üretim &amp; OEE</div>
+  <div class="tab" data-tab="downtime" onclick="switchTab('downtime')">Duruş Analizi</div>
   <div class="tab" data-tab="oil" onclick="switchTab('oil')">Yağ</div>
 </div>
 
@@ -107,6 +141,67 @@
     <div class="card chart-card" data-chart="oee">
       <div class="card-label">Günlük Hat OEE (%) <span class="hint">⤢ büyüt</span></div>
       <div class="chart-wrap" id="oeeChart"></div>
+    </div>
+  </div>
+</div>
+
+<!-- DURUŞ ANALİZİ -->
+<div class="panel" id="panel-downtime">
+  <div class="card">
+    <div class="card-label">Analiz Aralığı</div>
+    <div class="downtime-controls">
+      <label>Başlangıç<input type="date" id="dtHistoryStart"></label>
+      <label>Bitiş<input type="date" id="dtHistoryEnd"></label>
+      <label>Vardiya
+        <select id="dtHistoryShift">
+          <option value="">Tüm vardiyalar</option>
+          <option value="vardiya_1">1. Vardiya</option>
+          <option value="vardiya_2">2. Vardiya</option>
+        </select>
+      </label>
+      <button type="button" id="dtHistoryLoad">Analizi Göster</button>
+    </div>
+    <div class="downtime-note" id="dtHistoryStatus">Seçili tarihler için OEE vardiya özetleri ve tamamlanmış duruş kayıtları birlikte analiz edilir.</div>
+  </div>
+
+  <div class="kpis downtime-kpis">
+    <div class="kpi"><div class="v" style="color:var(--blue)" id="dtGross">—</div><div class="l">Brüt Vardiya</div><div class="s" id="dtGrossSub">—</div></div>
+    <div class="kpi"><div class="v" style="color:var(--green)" id="dtRun">—</div><div class="l">Net Çalışma</div><div class="s" id="dtRunSub">—</div></div>
+    <div class="kpi"><div class="v" style="color:var(--red)" id="dtTotal">—</div><div class="l">Toplam Duruş</div><div class="s" id="dtTotalSub">—</div></div>
+    <div class="kpi"><div class="v" style="color:var(--cyan)" id="dtAvailability">—</div><div class="l">Kullanılabilirlik</div><div class="s">OEE vardiya özetlerinden</div></div>
+    <div class="kpi"><div class="v" style="color:var(--amber)" id="dtCount">—</div><div class="l">Duruş Adedi</div><div class="s" id="dtCountSub">—</div></div>
+    <div class="kpi"><div class="v" style="color:var(--purple)" id="dtTopReason">—</div><div class="l">En Çok Duruş</div><div class="s" id="dtTopReasonSub">—</div></div>
+  </div>
+
+  <div class="card">
+    <div class="reason-head">
+      <div>
+        <div class="card-label" style="margin-bottom:4px">Sebep Detayı</div>
+        <div style="font-size:12px;color:var(--dim)">Bir sebep seçerek süre, adet, ortalama ve gün dağılımını inceleyin.</div>
+      </div>
+      <label>Duruş sebebi<select id="dtReasonSelect"><option value="">Tüm duruş sebepleri</option></select></label>
+    </div>
+    <div class="kpis reason-kpis">
+      <div class="kpi"><div class="v" id="dtSelectedDuration">—</div><div class="l">Seçili Süre</div></div>
+      <div class="kpi"><div class="v" id="dtSelectedCount">—</div><div class="l">Seçili Adet</div></div>
+      <div class="kpi"><div class="v" id="dtSelectedAverage">—</div><div class="l">Ortalama Duruş</div></div>
+      <div class="kpi"><div class="v" id="dtSelectedShare">—</div><div class="l">Toplamdaki Payı</div></div>
+    </div>
+  </div>
+
+  <div class="downtime-grid">
+    <div class="card">
+      <div class="card-label" id="dtDailyTitle">Günlük Duruş Dağılımı</div>
+      <div class="daily-bars" id="dtDailyBars"><div class="empty">Analiz yükleniyor…</div></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Duruş Sebepleri</div>
+      <div class="downtime-table-wrap">
+        <table class="downtime-table">
+          <thead><tr><th>Sebep</th><th>Tür</th><th>Adet</th><th>Toplam</th><th>Ortalama</th><th>Pay</th></tr></thead>
+          <tbody id="dtReasonRows"><tr><td colspan="6" class="empty">Analiz yükleniyor…</td></tr></tbody>
+        </table>
+      </div>
     </div>
   </div>
 </div>
@@ -495,6 +590,7 @@ function switchTab(name){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));
   document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active',p.id==='panel-'+name));
   if(name==='oil') loadOil();
+  if(name==='downtime' && window.loadDowntimeHistory) window.loadDowntimeHistory();
 }
 document.getElementById('oilDaysSeg').addEventListener('click',e=>{
   if(e.target.tagName!=='BUTTON')return;
