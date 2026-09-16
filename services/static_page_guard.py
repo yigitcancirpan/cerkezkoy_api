@@ -12,6 +12,7 @@ LINE_SCOPED_STATIC_PAGES = frozenset(
         "/static/dashboard.html",
         "/static/downtime_monitor.html",
         "/static/downtimes.html",
+        "/static/planning.html",
         "/static/scrap.html",
         "/static/setup.html",
     }

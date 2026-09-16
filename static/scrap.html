@@ -80,6 +80,7 @@
 
   .footer{text-align:center;color:var(--dim);font-size:10px;margin-top:10px;}
 </style>
+<script src="/static/material_reporting.js?v=1.08" defer></script>
 </head>
 <body>
 
@@ -112,6 +113,7 @@
   <div class="retro-form">
     <div class="retro-field"><label>Üretim tarihi</label><input type="date" id="retroDate"></div>
     <div class="retro-field"><label>Vardiya</label><select id="retroShift"></select></div>
+    <div class="retro-field"><label>Malzeme</label><select id="retroMaterial"><option value="">Yükleniyor…</option></select></div>
     <div class="retro-field"><label>Fire sebebi</label><select id="retroReason"></select></div>
     <div class="retro-field"><label>Adet</label><input type="number" id="retroQty" min="1" step="1" value="1"></div>
     <div class="retro-field"><label>Not (opsiyonel)</label><input type="text" id="retroNotes" maxlength="250" placeholder="Açıklama"></div>
@@ -293,6 +295,8 @@ document.querySelectorAll('.chart-card').forEach(c=>c.addEventListener('click',(
 /* ─── veri ─── */
 const params=new URLSearchParams(location.search);
 const urlDate=params.get('date'); const urlShift=params.get('shift');
+const selectedMaterialId=new URLSearchParams(location.search).get('material_id');
+const materialSuffix=selectedMaterialId!==null?'&material_id='+encodeURIComponent(selectedMaterialId):'';
 const lineId=parseInt(params.get('line_id')||params.get('line')); // dashboard ?line= ile geliyor
 let LINE_NAME='';
 document.getElementById('dashLink').href = `/static/dashboard.html?line=${lineId}`;
@@ -359,13 +363,13 @@ async function loadRetroOptions(resetOnRangeError=true){
 async function loadRetroEntries(){
   const target=retroDateEl.value,shift=retroShiftEl.value;
   if(!target||!shift)return;
-  const data=await apiJson(`${API}/api/v1/scrap/history?line_id=${lineId}&date_from=${target}&date_to=${target}&shift=${encodeURIComponent(shift)}&limit=100`);
+  const data=await apiJson(`${API}/api/v1/scrap/history?line_id=${lineId}&date_from=${target}&date_to=${target}&shift=${encodeURIComponent(shift)}&limit=100${materialSuffix}`);
   const rows=data.items||[],tbody=document.getElementById('retroRows');
   if(!rows.length){tbody.innerHTML='<tr><td colspan="7" class="empty">Bu vardiyada fire kaydı yok</td></tr>';return;}
   tbody.innerHTML=rows.map(item=>`<tr>
     <td class="mono">${escapeHtml(item.production_date)}</td>
     <td>${escapeHtml(SHIFT_LABEL[item.shift]||item.shift)}</td>
-    <td>${escapeHtml(item.reason_name)}</td>
+    <td>${escapeHtml(item.reason_name)}<br><small>${escapeHtml(item.material_code||"Belirsiz malzeme")}</small></td>
     <td class="mono" style="color:var(--red);font-weight:700;">${item.qty}</td>
     <td>${escapeHtml(item.notes||'—')}</td>
     <td class="mono" style="color:var(--dim);">${escapeHtml(new Date(item.created_at).toLocaleString('tr-TR'))}</td>
@@ -380,6 +384,7 @@ async function saveRetroScrap(){
     const data=await apiJson(`${API}/api/v1/scrap/entry`,{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({line_id:lineId,reason_id:Number(retroReasonEl.value),qty,
+        material_id:document.getElementById('retroMaterial').value?Number(document.getElementById('retroMaterial').value):null,
         production_date:retroDateEl.value,shift:retroShiftEl.value,
         notes:retroNotesEl.value.trim()||null,source:'historical'}),
     });
@@ -414,28 +419,13 @@ function currentRange(){
 
 // Seçili aralıktaki toplam üretimi vardiya özetlerinden topla
 async function fetchRangeProduction(from,to){
-  try{
-    const daysBack=Math.ceil((new Date(todayLocal())-new Date(from))/86400000)+2;
-    const r=await fetch(`${API}/api/v1/production/shifts?line_id=${lineId}&days=${Math.max(daysBack,2)}`);
-    if(!r.ok) return 0;
-    const arr=await r.json();
-    let total=0, hasToday=false; const today=todayLocal();
-    arr.forEach(s=>{
-      if(s.shift_date>=from && s.shift_date<=to) total+=s.total_produced||0;
-      if(s.shift_date===today) hasToday=true;
-    });
-    // Bugün dahilse ve henüz vardiya özeti yoksa anlık üretimi ekle
-    if(!hasToday && from<=today && to>=today){
-      try{const cr=await fetch(`${API}/api/v1/production/current/${lineId}`);
-        if(cr.ok){const cd=await cr.json(); total+=cd.produced||0;}}catch(e){}
-    }
-    return total;
-  }catch(e){return 0;}
+  const data=await apiJson(`${API}/api/v1/material-report?line_id=${lineId}&start=${from}&end=${to}${materialSuffix}${urlShift?'&shift='+encodeURIComponent(urlShift):''}`);
+  return data.total_produced;
 }
 
 async function load(){
   const {from,to}=currentRange();
-  let qs=`line_id=${lineId}&date_from=${from}&date_to=${to}`;
+  let qs=`line_id=${lineId}&date_from=${from}&date_to=${to}${materialSuffix}`;
   if(urlDate){
     if(urlShift) qs+=`&shift=${urlShift}`;
     document.getElementById('sub').textContent=`${LINE_NAME}${fmtDM(urlDate)} · ${SHIFT_LABEL[urlShift]||urlShift||'Tüm vardiyalar'}`;

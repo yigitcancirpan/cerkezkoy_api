@@ -22,3 +22,11 @@ test_mqtt_credentials.py
 # Yerel notlar
 readMe.txt
 
+# Yerel kurulum paketleri ve gizli dosyalar
+.env.*
+/stage1_*_package.zip
+/stage1_*/
+/stage1_*.patch
+/stage1_*.sql
+/STAGE1_*.md
+/SHA256SUMS.txt

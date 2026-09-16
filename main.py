@@ -9,7 +9,7 @@ from models.database import engine, Base
 from models.downtime_models import Downtime, DowntimeReason
 from services.mqtt_service import mqtt_service
 from services.static_page_guard import line_context_redirect_url
-from routers import sensors, machines, alerts, batch_transfer, websocket_router, assignments, lines
+from routers import sensors, machines, alerts, batch_transfer, websocket_router, assignments, lines, planning
 from routers import downtimes, production, health, oil, scrap, reports, settings as settings_router
 
 @asynccontextmanager
@@ -48,6 +48,9 @@ app.include_router(reports.router)
 app.include_router(settings_router.router)
 app.include_router(assignments.router)
 app.include_router(lines.router)
+app.include_router(planning.router)
+from routers import material_reporting
+app.include_router(material_reporting.router)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 

@@ -42,6 +42,7 @@ logger = logging.getLogger("scrap")
 
 
 class ScrapEntryRequest(BaseModel):
+    material_id: Optional[int] = None
     line_id: int
     reason_id: int
     qty: int
@@ -102,16 +103,19 @@ def create_scrap(req: ScrapEntryRequest, db: Session = Depends(get_db)):
     except (ScrapDateError, ScrapShiftError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
+    from services.material_service import require_scrap_material
+    material_id = require_scrap_material(db, req.line_id, production_date, shift_code, req.material_id, req.qty)
     try:
         row = db.execute(text("""
             INSERT INTO scrap_entries
                 (line_id, reason_id, qty, production_date, shift,
-                 operator_name, notes, source, created_at)
+                 operator_name, notes, source, created_at, material_id)
             VALUES
                 (:lid, :rid, :qty, :production_date, :shift,
-                 :op, :notes, :src, NOW())
+                 :op, :notes, :src, NOW(), :material_id)
             RETURNING id, created_at
         """), {
+            "material_id": material_id,
             "lid": req.line_id,
             "rid": req.reason_id,
             "qty": req.qty,
@@ -228,6 +232,7 @@ def scrap_summary(
     line_id: int,
     target_date: Optional[date] = Query(None, description="YYYY-MM-DD — boşsa bugün"),
     shift: Optional[str] = Query(None),
+    material_id: Optional[int] = Query(None, ge=0),
     db: Session = Depends(get_db),
 ):
     d = target_date or date.today()
@@ -236,6 +241,9 @@ def scrap_summary(
     if shift:
         shift_clause = " AND e.shift = :shift"
         params["shift"] = shift
+    if material_id is not None:
+        shift_clause += " AND COALESCE(e.material_id,0)=:material_id"
+        params['material_id'] = material_id
 
     rows = db.execute(text(f"""
         SELECT r.reason_code, r.reason_name, r.color_hex,
@@ -259,10 +267,13 @@ def scrap_history(
     date_from: Optional[date] = Query(None, description="YYYY-MM-DD"),
     date_to: Optional[date] = Query(None, description="YYYY-MM-DD"),
     shift: Optional[str] = Query(None),
+    material_id: Optional[int] = Query(None, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
 ):
     clauses, params = [], {"lim": limit}
+    if material_id is not None:
+        clauses.append('COALESCE(e.material_id,0)=:material_id'); params['material_id'] = material_id
     if line_id:
         clauses.append("e.line_id = :lid"); params["lid"] = line_id
     if date_from:
@@ -274,10 +285,12 @@ def scrap_history(
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
     rows = db.execute(text(f"""
-        SELECT e.id, e.line_id, e.qty, e.production_date, e.shift,
+        SELECT e.id, e.line_id, e.qty, e.production_date, e.shift, e.material_id,
+               m.material_code, m.material_name,
                e.operator_name, e.notes, e.source,
                e.created_at, r.reason_code, r.reason_name, r.color_hex
         FROM scrap_entries e
+        LEFT JOIN materials m ON m.material_id=e.material_id
         JOIN scrap_reasons r ON e.reason_id = r.reason_id
         {where}
         ORDER BY e.created_at DESC
@@ -297,6 +310,8 @@ def delete_scrap(entry_id: int, db: Session = Depends(get_db)):
     """), {"id": entry_id}).fetchone()
     if not entry:
         raise HTTPException(404, "Kayıt bulunamadı")
+    db.execute(text('SELECT pg_advisory_xact_lock(hashtext(:key))'),
+               {'key': f'material-scrap:{entry.line_id}:{entry.production_date}:{entry.shift}'})
 
     try:
         validate_production_date(entry.production_date)
@@ -337,9 +352,12 @@ def scrap_analysis(
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
     shift: Optional[str] = Query(None),
+    material_id: Optional[int] = Query(None, ge=0),
     db: Session = Depends(get_db),
 ):
     clauses, params = ["e.qty > 0"], {}
+    if material_id is not None:
+        clauses.append('COALESCE(e.material_id,0)=:material_id'); params['material_id'] = material_id
     if line_id:
         clauses.append("e.line_id = :lid"); params["lid"] = line_id
     if shift:

@@ -71,6 +71,7 @@
 
   .footer{text-align:center;color:var(--dim);font-size:10px;margin-top:10px;}
 </style>
+<script src="/static/material_reporting.js?v=1.08" defer></script>
 </head>
 <body>
 
@@ -86,6 +87,7 @@
     <span class="badge" style="background:var(--amber);color:#000;display:none;" id="noDataBadge">Henüz veri yok</span>
     <span class="badge" style="background:var(--card2);color:var(--dim);" id="shiftBadge">—</span>
     <span class="badge" style="background:var(--card2);color:var(--dim);" id="modelBadge">—</span>
+    <a class="badge" id="planningLink" href="/static/planning.html" style="background:var(--green);color:#04121a;text-decoration:none;">📋 Planlama</a>
     <a class="badge" id="analyticsLink" href="/static/analytics.html" style="background:var(--purple);color:white;text-decoration:none;">📈 Geçmiş</a>    <a class="badge" id="setupLink" href="/static/setup.html" style="background:var(--red);color:#04121a;text-decoration:none;">⚙ Kurulum</a>
     <a class="badge" id="adminLink" href="/static/admin.html" style="background:var(--cyan);color:#04121a;text-decoration:none;">🛃 Yönetim</a>
     <a class="badge" id="downtimeLink" href="/static/downtime_monitor.html" style="background:var(--amber);color:#04121a;text-decoration:none;">✋🏼 Duruş Takip</a>
@@ -243,11 +245,15 @@ const _lineParams = new URLSearchParams(location.search);
 const LID = parseInt(_lineParams.get('line') || _lineParams.get('line_id'));
 // Tüm sayfa linklerine hattı taşı
 [['scrapLink','scrap.html'], ['setupLink','setup.html'], ['adminLink','admin.html'],
- ['analyticsLink','analytics.html'], ['downtimeLink','downtime_monitor.html']
+ ['analyticsLink','analytics.html'], ['downtimeLink','downtime_monitor.html'],
+ ['planningLink','planning.html']
 ].forEach(([id, page]) => {
   const a = document.getElementById(id);
   if (a) a.href = `/static/${page}?line=${LID}`;
 });
+if (LID !== 2) {
+  document.getElementById('planningLink').style.display = 'none';
+}
 
 // Hat adını başlığa yaz (tek istek)
 (async () => {
@@ -462,7 +468,7 @@ async function fetchCurrent(){
 
     const avg=d.average_cycle||0;
     document.getElementById('avgCycle').textContent=avg>0?`Ort: ${(avg/10).toFixed(1)}s`:'—';
-    document.getElementById('modelBadge').textContent=d.model_id?`Model ${d.model_id}`:'—';
+    document.getElementById('modelBadge').textContent=d.material_code?`${d.material_code} · ${d.material_name}`:'Belirsiz malzeme';
 
     // İlk/Son baskı
     document.getElementById('firstCycle').textContent=fmtTime(d.first_cycle_at);

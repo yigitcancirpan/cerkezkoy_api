@@ -67,12 +67,13 @@
 
   .footer{text-align:center;color:var(--dim);font-size:10px;margin-top:10px;}
 </style>
+<script src="/static/material_reporting.js?v=1.08" defer></script>
 </head>
 <body>
 
 <div class="top">
   <h1>📈 Geçmiş <span>&amp; Analiz</span></h1>
-  <a class="back" href="/static/dashboard.html">← Dashboard</a>
+  <a class="back" id="historyDashboardLink" href="/static/dashboard.html">← Dashboard</a>
 </div>
 
 <div class="tabs">
@@ -94,7 +95,7 @@
   <div class="kpis">
     <div class="kpi"><div class="v" style="color:var(--green);" id="kProd">—</div><div class="l">Toplam Üretim</div></div>
     <div class="kpi"><div class="v" style="color:var(--red);" id="kScrap">—</div><div class="l">Toplam Fire</div></div>
-    <div class="kpi"><div class="v" style="color:var(--cyan);" id="kOee">—</div><div class="l">Ort. OEE</div></div>
+    <div class="kpi"><div class="v" style="color:var(--cyan);" id="kOee">—</div><div class="l">Ort. Hat OEE</div></div>
     <div class="kpi"><div class="v" style="color:var(--amber);" id="kDays">—</div><div class="l">Gün Sayısı</div></div>
   </div>
 
@@ -104,7 +105,7 @@
       <div class="chart-wrap" id="prodChart"></div>
     </div>
     <div class="card chart-card" data-chart="oee">
-      <div class="card-label">Günlük OEE (%) <span class="hint">⤢ büyüt</span></div>
+      <div class="card-label">Günlük Hat OEE (%) <span class="hint">⤢ büyüt</span></div>
       <div class="chart-wrap" id="oeeChart"></div>
     </div>
   </div>
@@ -159,6 +160,7 @@
 const API = window.location.origin;
 const _lineParams = new URLSearchParams(location.search);
 const LID = parseInt(_lineParams.get('line') || _lineParams.get('line_id'));
+document.getElementById('historyDashboardLink').href='/static/dashboard.html?line='+LID;
 const PRESS = {
   1: {color:'var(--cyan)',   tag:'88-470'},
   2: {color:'var(--amber)',  tag:'95-470'},
@@ -363,8 +365,9 @@ function timeTicks(series){const xs=[];series.forEach(s=>s.pts.forEach(p=>xs.pus
 let prodDays=15;
 async function loadProduction(){
   try{
+    const selectedMaterial=new URLSearchParams(location.search).get('material_id');
     const [shiftResponse,oeeResponse]=await Promise.all([
-      fetch(`${API}/api/v1/production/shifts?line_id=${LID}&days=${prodDays}`),
+      fetch(`${API}/api/v1/material-report?line_id=${LID}&start=${dateNDaysAgo(prodDays)}&end=${todayLocal()}${selectedMaterial!==null?'&material_id='+encodeURIComponent(selectedMaterial):''}`),
       fetch(`${API}/api/v1/production/oee?line_id=${LID}&date_from=${dateNDaysAgo(prodDays)}&date_to=${todayLocal()}`)
     ]);
     if(!shiftResponse.ok||!oeeResponse.ok){
@@ -372,14 +375,14 @@ async function loadProduction(){
       emptyMsg(document.getElementById('oeeChart'),'OEE verisi alınamadı');
       return;
     }
-    const rows=await shiftResponse.json();
+    const report=await shiftResponse.json(), rows=report.items;
     const oeeData=await oeeResponse.json();
     const byDate={};
     rows.forEach(s=>{
-      const d=s.shift_date;
+      const d=s.date;
       if(!byDate[d])byDate[d]={good:0,scrap:0,prod:0};
-      const prod=s.total_produced||0,scrap=s.total_scrap||0;
-      byDate[d].prod+=prod;byDate[d].scrap+=scrap;byDate[d].good+=Math.max(prod-scrap,0);
+      const prod=s.produced||0,scrap=s.scrap||0;
+      byDate[d].prod+=prod;byDate[d].scrap+=scrap;byDate[d].good+=s.good||0;
     });
     const dates=Object.keys(byDate).sort();
     let tP=0,tS=0;
@@ -390,14 +393,17 @@ async function loadProduction(){
     document.getElementById('kOee').textContent=Number.isFinite(overall)?`%${overall.toFixed(1)}`:'—';
     document.getElementById('kDays').textContent=dates.length;
     const barData=dates.map(d=>({label:fmtDM(d),good:byDate[d].good,scrap:byDate[d].scrap}));
-    specs.prod={type:'bar',payload:barData,title:'Günlük Üretim'};
-    renderInto(document.getElementById('prodChart'),specs.prod);
+    specs.prod={type:'bar',payload:barData,title:'Günlük Üretim · Seçilen malzeme kapsamı'};
+    if(rows.some(r=>r.good===null)){
+      specs.prod=null;
+      emptyMsg(document.getElementById('prodChart'),'Belirsiz fire nedeniyle sağlam/fire grafiği hesaplanamıyor. Malzeme tablosundaki üretim ve fire adetlerini kontrol edin.');
+    }else renderInto(document.getElementById('prodChart'),specs.prod);
     const oeeDaily=oeeData.daily||[];
     const oeeDates=oeeDaily.map(item=>item.date);
     const oeePts=oeeDaily.map((item,i)=>({x:i,y:+item.overall}));
     const step=oeeDates.length>16?Math.ceil(oeeDates.length/16):1;
     const oeeTicks=oeeDates.map((d,i)=>({x:i,label:fmtDM(d)})).filter((_,i)=>i%step===0);
-    specs.oee={type:'line',title:'Günlük OEE (%)',payload:{
+    specs.oee={type:'line',title:'Günlük Hat OEE (%)',payload:{
       series:[{name:'OEE',color:'var(--cyan)',pts:oeePts}],
       xTicks:oeeTicks,yMin:0,yMax:100,yFmt:v=>v.toFixed(0),
       tipXLabel:i=>fmtDM(oeeDates[Math.round(i)]),tipYFmt:v=>'%'+v.toFixed(1)

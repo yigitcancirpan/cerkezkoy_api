@@ -70,15 +70,31 @@ def get_current(line_id: int, db: Session = Depends(get_db)):
         return {"produced": 0, "target": 0}
 
     result = dict(row._mapping)
-    # Sık sorgulanan dashboard için hafif vardiya üretim tahmini.
-    # Kesin OEE/özet hesabı sayaç resetlerini de işleyen oee_service içindedir.
+    from services.material_service import material_list, unique_models
+    material = unique_models(material_list(db)).get(result.get('model_id'))
+    result.update(material_id=material['material_id'] if material else None,
+                  material_code=material['material_code'] if material else None,
+                  material_name=material['material_name'] if material else 'Belirsiz malzeme')
+    # Sum reset-aware counter differences inside the actual shift window.
     sc = result.get("current_shift")
     if sc:
+        import shift_utils
+        from zoneinfo import ZoneInfo
+        now_local = datetime.now(ZoneInfo('Europe/Istanbul'))
+        cfg = shift_utils.shift_by_code(sc, line_id=line_id, dt=now_local)
+        production_day = shift_utils.shift_date_for_datetime(cfg, now_local)
+        begin = datetime.combine(production_day, datetime.min.time(), now_local.tzinfo) + timedelta(hours=cfg['start_hour'])
+        finish = shift_utils.shift_end_datetime(cfg, production_day, now_local.tzinfo)
         pr = db.execute(text("""
-            SELECT COALESCE(MAX(produced) - MIN(produced), 0)
-            FROM production_log
-            WHERE line_id = :lid AND logged_at::date = CURRENT_DATE AND shift = :shift
-        """), {"lid": line_id, "shift": sc}).fetchone()
+            WITH samples AS (
+              SELECT produced, LAG(produced) OVER(ORDER BY logged_at, log_id) AS previous
+              FROM production_log WHERE line_id=:lid AND shift=:shift
+              AND logged_at>=:begin AND logged_at<:finish
+            )
+            SELECT COALESCE(SUM(CASE WHEN previous IS NULL THEN 0
+              WHEN produced>=previous THEN produced-previous ELSE GREATEST(produced,0) END),0)
+            FROM samples
+        """), {"lid": line_id, "shift": sc, 'begin': begin, 'finish': finish}).fetchone()
         result["produced_shift"] = int(pr[0]) if pr else 0
     else:
         result["produced_shift"] = result.get("produced", 0)
@@ -90,8 +106,8 @@ def get_current(line_id: int, db: Session = Depends(get_db)):
         first_row = db.execute(text("""
             SELECT MIN(logged_at) AS first_at
             FROM production_log
-            WHERE line_id = :lid AND logged_at::date = CURRENT_DATE AND shift = :shift
-        """), {"lid": line_id, "shift": shift_code}).fetchone()
+            WHERE line_id = :lid AND logged_at>=:begin AND logged_at<:finish AND shift = :shift
+        """), {"lid": line_id, "shift": shift_code, 'begin': begin, 'finish': finish}).fetchone()
     else:
         first_row = db.execute(text("""
             SELECT MIN(logged_at) AS first_at
@@ -102,7 +118,7 @@ def get_current(line_id: int, db: Session = Depends(get_db)):
     if first_row and first_row[0]:
         result["first_cycle_at"] = first_row[0]   # snapshot'ı override et
 
-    # Vardiya içi dashboard değeri: production_log MAX−MIN (yukarıda hesaplandı)
+    # Vardiya içi dashboard değeri: resetleri içeren sayaç farkları.
     # shift_produced, produced_shift'in takma adı (frontend/terminal bu ismi kullanıyor)
     result["shift_produced"] = result["produced_shift"]
 

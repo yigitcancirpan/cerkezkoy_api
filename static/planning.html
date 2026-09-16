@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Malzeme Üretim Planlama</title>
+<style>
+  *{box-sizing:border-box} :root{--bg:#0a0e17;--card:#111827;--card2:#172033;--border:#263349;--text:#e5eaf3;--dim:#8b98ad;--green:#22c55e;--red:#ef4444;--amber:#f59e0b;--orange:#f97316;--blue:#3b82f6;--purple:#8b5cf6}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;padding:16px;min-height:100vh}
+  button,input,select,textarea{font:inherit} button{cursor:pointer}
+  .top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+  .top h1{font-size:20px;margin:0}.top h1 span{color:var(--green)}
+  .top-right,.controls,.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .badge,.btn{border:1px solid var(--border);background:var(--card2);color:var(--text);border-radius:7px;padding:7px 11px;text-decoration:none;font-size:12px;font-weight:700}
+  .btn.primary{background:var(--blue);border-color:var(--blue);color:white}.btn.green{background:var(--green);border-color:var(--green);color:#04130a}.btn.danger{color:#fecaca;border-color:#7f1d1d}.btn:disabled{opacity:.45;cursor:not-allowed}
+  .scope{font-size:12px;color:var(--dim)}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:11px;padding:14px;margin-bottom:12px}
+  .card-title{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;font-size:13px;font-weight:800}.card-title small{color:var(--dim);font-weight:400}
+  label{font-size:11px;color:var(--dim)} input,select,textarea{background:var(--card2);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:7px 9px}
+  input[type=number]{width:100px} input[type=date]{width:145px}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}@media(max-width:850px){.kpis{grid-template-columns:repeat(2,1fr)}}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:13px}.kpi .value{font-size:25px;font-weight:800;font-variant-numeric:tabular-nums}.kpi .label{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin-top:4px}.kpi .sub{font-size:10px;color:var(--dim);margin-top:3px}
+  .tabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}.tab{border:1px solid var(--border);background:var(--card);color:var(--dim);padding:9px 15px;border-radius:8px;font-weight:700}.tab.active{border-color:var(--blue);color:white;background:#172554}.panel{display:none}.panel.active{display:block}
+  .scroll{overflow:auto;border:1px solid var(--border);border-radius:9px;max-height:66vh} table{border-collapse:separate;border-spacing:0;width:100%;font-size:12px} th,td{padding:8px 9px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums} th{position:sticky;top:0;background:#0f172a;color:var(--dim);z-index:2;font-size:10px;text-transform:uppercase;letter-spacing:.5px} th:first-child,td:first-child{position:sticky;left:0;background:#0f172a;text-align:left;z-index:3;font-weight:700} tr:last-child td{border-bottom:0} th:last-child,td:last-child{border-right:0}
+  .matrix input{width:86px;text-align:right;padding:5px}.matrix .date-head{text-align:center;min-width:104px}.source{display:block;font-size:8px;color:var(--dim);margin-top:3px;text-align:center}.reset{border:0;background:transparent;color:var(--amber);padding:2px;font-size:11px}.status{display:inline-block;width:10px;height:10px;border-radius:50%}.status.green{background:var(--green)}.status.yellow{background:var(--amber)}.status.orange{background:var(--orange)}.status.red{background:var(--red)}
+  .neg{color:#fca5a5;font-weight:800}.ok{color:#86efac}.warn{color:#fcd34d}.muted{color:var(--dim)}
+  .form-grid{display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:12px}@media(max-width:850px){.form-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:520px){.form-grid{grid-template-columns:1fr}}
+  .field{display:flex;flex-direction:column;gap:5px}.field input,.field select{width:100%}.workdays{display:flex;gap:9px;flex-wrap:wrap}.workdays label{display:flex;align-items:center;gap:4px;background:var(--card2);padding:6px 8px;border-radius:6px}
+  .order-form{display:grid;grid-template-columns:145px 130px 150px 150px minmax(180px,1fr) auto;gap:9px;align-items:end}@media(max-width:1000px){.order-form{grid-template-columns:repeat(2,1fr)}}.order-form input,.order-form select{width:100%}.left{text-align:left}
+  .message{display:none;padding:10px 12px;border-radius:8px;margin-bottom:12px;font-size:12px}.message.ok{display:block;background:#0d2a19;border:1px solid #166534}.message.error{display:block;background:#2a1215;border:1px solid #7f1d1d;color:#fecaca}
+  .modal{display:none;position:fixed;inset:0;background:#000b;z-index:50;align-items:center;justify-content:center;padding:16px}.modal.open{display:flex}.modal-card{width:min(850px,96vw);background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px}.modal textarea{width:100%;height:220px;resize:vertical;font-family:ui-monospace,Consolas,monospace;font-size:12px}.hint{font-size:11px;color:var(--dim);line-height:1.5;margin:8px 0}
+  .loading{opacity:.55;pointer-events:none}.footer{text-align:center;color:var(--dim);font-size:10px;margin-top:12px}
+  .field input[type=checkbox]{width:auto}
+  #autoOptions .field{padding:10px;background:var(--card2);border-radius:8px}
+  #autoOptions .auto-option{gap:8px}#autoOptions .auto-option label{display:flex;flex-direction:column;gap:4px}
+  #autoOptions .auto-option label:has(input[type=checkbox]){display:block}.break-fields{display:grid;grid-template-columns:1fr 90px;gap:7px}.break-fields input{width:100%}
+  #autoTable td:nth-child(2){text-align:left}
+  #autoComparison .selected-plan td{background:#0d2a19;color:#bbf7d0;font-weight:800}
+  #autoComparison .selected-plan td:first-child{background:#0d2a19}
+</style>
+<script src="/static/material_reporting.js?v=1.08" defer></script>
+</head>
+<body>
+<div class="top">
+  <div><h1>📋 Üretim <span>Planlama</span></h1><div class="scope" id="scopeText">World Hattı · 2962070700</div></div>
+  <div class="top-right"><a class="badge" id="dashboardLink" href="/static/dashboard.html">← Dashboard</a><span class="badge" id="targetBadge">Hedef: —</span></div>
+</div>
+
+<div id="message" class="message"></div>
+
+<div id="manualOverview">
+<div class="card">
+  <div class="controls">
+    <label>Başlangıç<br><input type="date" id="startDate"></label>
+    <label>Görünüm<br><select id="horizon"><option value="31">31 gün</option><option value="90" selected>3 ay</option><option value="180">6 ay</option><option value="365">12 ay</option></select></label>
+    <button class="btn primary" onclick="loadBoard()">Yenile</button>
+    <button class="btn" onclick="openPaste()">Excel’den Yapıştır</button>
+    <span class="scope" id="rangeText"></span>
+  </div>
+</div>
+
+<div class="kpis">
+  <div class="kpi"><div class="value" id="kFirst" style="color:var(--red)">—</div><div class="label">İlk Mamul Açığı</div><div class="sub" id="kFirstSub">—</div></div>
+  <div class="kpi"><div class="value" id="kMax" style="color:var(--amber)">—</div><div class="label">En Yüksek Açık</div><div class="sub">seçili dönem</div></div>
+  <div class="kpi"><div class="value" id="kRaw" style="color:var(--orange)">—</div><div class="label">İlk Hammadde Açığı</div><div class="sub" id="kRawSub">—</div></div>
+  <div class="kpi"><div class="value" id="kClose" style="color:var(--green)">—</div><div class="label">Dönem Sonu Stok</div><div class="sub" id="kCloseSub">—</div></div>
+</div>
+
+</div>
+<div class="tabs">
+  <button class="tab" data-panel="auto" onclick="showPanel('auto')">Otomatik Üretim Planı</button>
+  <button class="tab active" data-panel="daily" onclick="showPanel('daily')">Günlük Plan</button>
+  <button class="tab" data-panel="weekly" onclick="showPanel('weekly')">Haftalık Özet</button>
+  <button class="tab" data-panel="monthly" onclick="showPanel('monthly')">Aylık Özet</button>
+  <button class="tab" data-panel="raw-orders" onclick="showPanel('raw-orders')">Hammadde Siparişleri</button>
+  <button class="tab" data-panel="settings" onclick="showPanel('settings')">Stok Ayarları</button>
+</div>
+
+
+<section class="panel" id="panel-auto">
+  <div class="card">
+    <div class="card-title"><span>Gün gün çalışma ve üretim önerisi</span><small class="selected-product"></small></div>
+    <fieldset id="autoControls" style="border:0;padding:0;margin:0;min-width:0">
+      <div class="controls">
+        <label>Plan başlangıcı<br><input type="date" id="autoStart" onchange="autoPeriodChanged()"></label>
+        <label>Minimum gün sonu stok<br><input id="autoMinimumStock" type="number" min="0" max="10000000" step="1" onchange="autoInvalidate()"><small>Yalnız bu plan için</small></label>
+        <label>Plan dönemi<br><select id="autoDays" onchange="autoPeriodChanged()"><option value="7">1 hafta</option><option value="14">2 hafta</option><option value="28" selected>4 hafta</option><option value="56">8 hafta</option></select></label>
+        <label>Sevkiyat zamanı<br><select id="autoDispatch" onchange="autoInvalidate()"><option value="after">Günün üretiminden sonra</option><option value="before">Günün üretiminden önce</option></select></label>
+        <label>Planlama yaklaşımı<br><select id="autoMode" onchange="autoInvalidate()"><option value="balanced_weekly" selected>Haftalık dengeli (önerilen)</option><option value="daily_flexible">Günlük esnek</option></select></label>
+        <label><input type="checkbox" id="autoPlanned" onchange="autoInvalidate()"> Teyitsiz hammadde partilerini de dahil et</label>
+      </div>
+      <p class="hint">Mamul ve hammadde stokları plan başlangıç gününün üretim öncesi sayımı olmalı. Gerekiyorsa Stok Ayarları sekmesinden güncelleyin. Hammadde gelişleri üretim öncesi hazır kabul edilir; gün içi teslimatları ilk kullanılabilir güne girin.</p>
+      <div class="workdays" id="autoWorkdays"></div>
+      <p class="hint">Seçili her çalışma günü en az <b>08.00–16.00</b> çalışılır. Kapasiteler mola dışı sağlam adet ve dönüşümlü ekibin sağlayacağı mola katkısı olarak ayrı tutulur; sistem mola çalışmasını yalnızca ihtiyaç varsa seçer. İki vardiya bu pilotta 08.00–16.00 + 16.00–24.00 olarak kabul edilir.</p>
+      <div class="form-grid" id="autoOptions"></div>
+      <div class="controls" style="margin-top:14px">
+        <label>Kapasite hesabı <select id="autoRateMode"><option value="top5" selected>Son 20 içinden en iyi 5</option><option value="average">Son 10 normal ortalama</option><option value="cautious">Temkinli (alt çeyrek)</option></select></label>
+        <label>İkinci vardiya verim varsayımı % <input type="number" id="autoSecondFactor" min="0" max="100" value="90"></label>
+        <button class="btn" onclick="autoHistory()">Geçmişten Kapasite Doldur</button>
+      </div>
+      <p class="hint" id="autoHistoryInfo">Her vardiya süresi kendi geçmişinden hesaplanır. Mola sırasında üretilen adet toplamdan ayrılarak çift sayım önlenir.</p>
+      <p class="hint" id="autoBasis">Elle girilen günlük sağlam adet kapasiteleri</p>
+    </fieldset>
+    <div class="actions"><button class="btn primary" id="autoGenerate" onclick="autoGenerate()">Otomatik Plan Oluştur / Yeniden Hesapla</button><button class="btn" id="autoRestore" onclick="autoRestore()">Kayıtlı Planı Aç</button></div>
+    <p id="autoMessage" class="hint" role="status" aria-live="polite"></p>
+  </div>
+  <div id="autoResult" hidden>
+    <div class="kpis" id="autoKpis"></div>
+    <div class="card">
+      <div class="card-title"><span>Plan karşılaştırması</span><small>Teslimat ve emniyet stokunu sağlayan alternatifler</small></div>
+      <div class="scroll"><table id="autoComparison"></table></div>
+      <p class="hint warn" id="autoCostWarning"></p>
+    </div>
+    <div class="card">
+      <div class="card-title"><span id="autoState"></span><small>Saat veya adet değişikliği günü sabitler; yeniden hesaplama diğer günleri düzenler.</small></div>
+      <div id="autoWarnings"></div>
+      <div class="scroll"><table id="autoTable"></table></div>
+      <p class="hint" id="autoAssumptions"></p>
+      <label><input type="checkbox" id="autoAcknowledge"> Uyarıları, stok tarihini, kapasite ve ekip uygunluğunu kontrol ettim. Onay bu dönemin mevcut günlük adet planlarını değiştirir.</label>
+      <div class="actions" style="margin-top:12px"><button class="btn green" id="autoApprove" disabled onclick="autoApprove()">Planı Onayla ve Günlük Plana Aktar</button></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title"><span>Uygulanacak plan ve gerçekleşen üretim</span><button class="btn" onclick="autoApproved().catch(e=>autoMessage(e.message,true))">Gerçekleşenleri Yenile</button></div>
+    <div class="scroll"><table id="autoApprovedTable"></table></div>
+    <p class="hint" id="autoActualHint"></p>
+    <p class="hint">Gerçekleşen üretim onaylı planı kendiliğinden değiştirmez. Yeni öneri için güncel stok sayımıyla yeni başlangıç günü seçin. Genel günlük/haftalık tablo, mevcut planlama modülünün tüm planlanan hammadde girişlerini içeren projeksiyonudur; bu sekmedeki teyitli senaryo ayrı saklanır.</p>
+  </div>
+</section>
+
+<section class="panel active" id="panel-daily">
+  <div class="card">
+    <div class="card-title"><span>Sipariş ve Günlük Üretim</span><div class="actions"><small>Değişen hücreler kaydedilir</small><button class="btn green" onclick="saveDailyChanges()">Değişiklikleri Kaydet</button></div></div>
+    <div class="scroll"><table class="matrix" id="dailyTable"></table></div>
+  </div>
+</section>
+
+<section class="panel" id="panel-raw-orders">
+  <div class="card">
+    <div class="card-title"><span>Yeni Hammadde Siparişi / Parti</span><small>Aynı güne birden fazla parti eklenebilir</small></div>
+    <div class="order-form">
+      <label class="field">Beklenen tarih<input type="date" id="rawOrderDate"></label>
+      <label class="field">Miktar<input type="number" min="0.001" step="0.001" id="rawOrderQty"></label>
+      <label class="field">Parti / referans<input maxlength="100" id="rawOrderBatch"></label>
+      <label class="field">Durum<select id="rawOrderStatus"><option value="planned">Planlandı</option><option value="confirmed">Teyitli</option><option value="received">Teslim alındı</option><option value="cancelled">İptal</option></select></label>
+      <label class="field">Not<input maxlength="300" id="rawOrderNotes"></label>
+      <button class="btn green" onclick="createRawOrder()">Parti Ekle</button>
+    </div>
+    <div class="hint">Tahminde yalnızca <b>Planlandı</b> ve <b>Teyitli</b> partiler kullanılmaktadır. Teslim alınan miktarı hammadde stok sayımına ekleyip sipariş durumunu “Teslim alındı” yapın.</div>
+  </div>
+  <div class="card">
+    <div class="card-title"><span>Hammadde Siparişleri</span><small id="rawOrderTotal">—</small></div>
+    <div class="scroll"><table id="rawOrdersTable"></table></div>
+  </div>
+</section>
+
+<section class="panel" id="panel-weekly">
+  <div class="card"><div class="card-title"><span>Haftalık Kapasite ve Açık</span><small>Girdiğiniz değer haftanın çalışma günlerine günlük olarak uygulanır</small></div><div class="scroll"><table id="weeklyTable"></table></div></div>
+</section>
+
+<section class="panel" id="panel-monthly">
+  <div class="card"><div class="card-title"><span>Aylık Stok ve Hammadde Özeti</span></div><div class="scroll"><table id="monthlyTable"></table></div></div>
+</section>
+
+<section class="panel" id="panel-settings">
+  <div class="card">
+    <div class="card-title"><span>Mamul Stoku</span><small class="selected-product"></small></div>
+    <div class="form-grid">
+      <label class="field">Mevcut stok (adet)<input type="number" min="0" id="finishedStock"></label>
+      <label class="field">Stok tarihi<input type="date" id="finishedAsOf"></label>
+      <label class="field">Emniyet stoku (adet)<input type="number" min="0" id="finishedSafety"></label>
+    </div>
+    <div class="actions" style="margin-top:14px"><button class="btn green" onclick="saveFinishedStock()">Mamul Stokunu Kaydet</button></div>
+  </div>
+  <div class="card">
+    <div class="card-title"><span>Hammadde</span><small>Birim tüketim 0 ise üretim hammaddeyle sınırlandırılmaz</small></div>
+    <div class="form-grid">
+      <label class="field">Hammadde kodu<input id="rawCode" maxlength="80"></label>
+      <label class="field">Hammadde adı<input id="rawName" maxlength="150"></label>
+      <label class="field">Stok birimi<select id="rawUnit"><option>kg</option><option>sac</option><option>rulo</option><option>adet</option></select></label>
+      <label class="field">Mevcut hammadde<input type="number" min="0" step="0.001" id="rawStock"></label>
+      <label class="field">Hammadde stok tarihi<input type="date" id="rawAsOf"></label>
+      <label class="field">Birim tüketim<input type="number" min="0" step="0.000001" id="rawPerPiece"></label>
+      <label class="field">Fire payı (%)<input type="number" min="0" max="100" step="0.001" id="rawScrap"></label>
+      <label class="field">Hammadde emniyet stoku<input type="number" min="0" step="0.001" id="rawSafety"></label>
+    </div>
+    <div class="actions" style="margin-top:14px"><button class="btn green" onclick="saveRawMaterial()">Hammadde Stok ve Tüketimini Kaydet</button></div>
+  </div>
+  <div class="card">
+    <div class="card-title"><span>Standart Çalışma Günleri</span><small>Haftalık değer ve sistem hedefi yalnızca seçili günlere uygulanır</small></div>
+    <div class="workdays" id="workdays"></div>
+    <div class="actions" style="margin-top:14px"><button class="btn green" onclick="saveWorkdays()">Çalışma Günlerini Kaydet</button></div>
+  </div>
+</section>
+
+<div class="modal" id="pasteModal" onclick="if(event.target===this)closePaste()">
+  <div class="modal-card">
+    <div class="card-title"><span>Excel Sipariş Tablosunu Yapıştır</span><button class="btn" onclick="closePaste()">✕</button></div>
+    <div class="hint">Başlık satırı <b>Stok, 20.Ağu, 21.Ağu…</b>; ürün satırı <b>2962070700, 1.969, 540, 4.500…</b> biçiminde olmalı. Excel’den seçip Ctrl+C, buraya Ctrl+V yapın.</div>
+    <textarea id="pasteText" placeholder="Satır Etiketleri&#9;Stok&#9;20.Ağu&#9;21.Ağu&#10;2962070700&#9;1.969&#9;540&#9;4.500"></textarea>
+    <div class="actions" style="margin-top:10px"><button class="btn primary" onclick="applyPaste()">Tabloya Aktar</button><button class="btn" onclick="closePaste()">Vazgeç</button></div>
+  </div>
+</div>
+
+<div class="footer">Tora Makina Çerkezköy · Planlama verileri OEE ve üretim sayaçlarını değiştirmez</div>
+
+<script>
+const API=window.location.origin, PRODUCT=new URLSearchParams(location.search).get('product_code')||'2962070700';
+const params=new URLSearchParams(location.search); const LID=parseInt(params.get('line')||params.get('line_id'));
+document.getElementById('dashboardLink').href=`/static/dashboard.html?line=${LID}`;
+let BOARD=null, CONFIG=null, RAW_ORDERS=[], pendingPaste=null;
+const sourceLabels={daily_override:'Günlük özel',weekly_default:'Haftalık',target_and_shifts:'Hedef × vardiya',shift_and_ideal_cycle:'Vardiya/çevrim',non_workday:'Çalışma yok',not_configured:'Tanımsız'};
+const dayNames=['Pzt','Sal','Çar','Per','Cum','Cmt','Paz'];
+const rawStatusLabels={planned:'Planlandı',confirmed:'Teyitli',received:'Teslim alındı',cancelled:'İptal'};
+
+function isoToday(){const d=new Date();d.setMinutes(d.getMinutes()-d.getTimezoneOffset());return d.toISOString().slice(0,10)}
+function addDays(iso,n){const d=new Date(iso+'T12:00:00');d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)}
+function trDate(iso){if(!iso)return '—';return new Date(iso+'T12:00:00').toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'2-digit'})}
+function nfmt(v,d=0){return Number(v||0).toLocaleString('tr-TR',{minimumFractionDigits:d,maximumFractionDigits:d?3:0})}
+function cls(v){return Number(v)<0?'neg':Number(v)===0?'warn':'ok'}
+function showMessage(text,type='ok'){const el=document.getElementById('message');el.textContent=text;el.className=`message ${type}`;setTimeout(()=>{el.className='message'},4500)}
+async function api(path,opts={}){const r=await fetch(API+path,{headers:{'Content-Type':'application/json'},...opts});if(!r.ok){let m=`HTTP ${r.status}`;try{const j=await r.json();m=Array.isArray(j.detail)?j.detail.map(x=>`${x.loc?.slice(1).join('.')}: ${x.msg}`).join('; '):(j.detail||m)}catch{}throw new Error(m)}return r.status===204?null:r.json()}
+function scopeQuery(){return `line_id=${LID}&product_code=${encodeURIComponent(PRODUCT)}`}
+
+function showPanel(name){document.getElementById('manualOverview').hidden=name==='auto';document.querySelectorAll('.panel').forEach(x=>x.classList.toggle('active',x.id===`panel-${name}`));document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.panel===name));if(name==='raw-orders')loadRawOrders()}
+
+async function loadConfig(){
+  const data=await api(`/api/v1/planning/config?${scopeQuery()}`);CONFIG=data.config;
+  document.getElementById('scopeText').textContent=`${data.line.line_name} · ${PRODUCT} · ${data.material.material_name}`;
+  document.getElementById('targetBadge').textContent=`Standart hedef: ${nfmt(data.material.default_target)} / vardiya`;
+  document.querySelectorAll('.selected-product').forEach(x=>x.textContent=PRODUCT);
+  const floor=document.getElementById('autoMinimumStock');if(floor.value==='')floor.value=CONFIG.finished_safety_stock;
+  fillConfig();
+}
+function fillConfig(){
+  const c=CONFIG; finishedStock.value=c.finished_stock;finishedAsOf.value=c.finished_stock_as_of;finishedSafety.value=c.finished_safety_stock;
+  rawCode.value=c.raw_material_code||'';rawName.value=c.raw_material_name||'';rawUnit.value=c.raw_unit||'kg';rawStock.value=c.raw_stock_qty;rawAsOf.value=c.raw_stock_as_of;rawPerPiece.value=c.raw_per_piece;rawScrap.value=c.raw_scrap_pct;rawSafety.value=c.raw_safety_stock;
+  const selected=new Set(c.workdays??[0,1,2,3,4,5]);workdays.innerHTML=dayNames.map((n,i)=>`<label><input type="checkbox" value="${i}" ${selected.has(i)?'checked':''}>${n}</label>`).join('');
+}
+
+async function loadBoard(){
+  if(LID!==2){showMessage('İlk planlama sürümü yalnızca World Hattı (line=2) içindir','error');return}
+  document.body.classList.add('loading');
+  try{
+    if(!CONFIG)await loadConfig(); const start=startDate.value||isoToday(), days=Number(horizon.value), end=addDays(start,days-1);
+    BOARD=await api(`/api/v1/planning/board?${scopeQuery()}&start_date=${start}&end_date=${end}`);
+    rangeText.textContent=`${trDate(start)} – ${trDate(end)}`;renderAll();await loadRawOrders();
+  }catch(e){showMessage(e.message,'error')}finally{document.body.classList.remove('loading')}
+}
+
+function renderAll(){renderKpis();renderDaily();renderWeekly();renderMonthly()}
+function renderKpis(){
+  const d=BOARD.daily, shorts=d.filter(x=>x.shortage_qty>0), raw=d.filter(x=>x.raw_shortage_qty>0), last=d[d.length-1];
+  kFirst.textContent=shorts.length?trDate(shorts[0].date):'Yok';kFirstSub.textContent=shorts.length?`${nfmt(shorts[0].shortage_qty)} adet açık`:'Seçili dönemde';
+  kMax.textContent=nfmt(Math.max(0,...d.map(x=>x.shortage_qty)));kRaw.textContent=!last.raw_configured?'Tanımsız':raw.length?trDate(raw[0].date):'Yok';kRawSub.textContent=!last.raw_configured?'Birim tüketim girilmeli':raw.length?`${nfmt(raw[0].raw_shortage_qty,1)} ${CONFIG.raw_unit}`:'Seçili dönemde';
+  kClose.textContent=nfmt(last.closing_finished_stock);kClose.className=`value ${cls(last.closing_finished_stock)}`;kCloseSub.textContent=`${trDate(last.date)} sonu`;
+}
+function renderDaily(){
+  const rows=BOARD.daily;let h='<thead><tr><th>Değer</th>'+rows.map(r=>`<th class="date-head">${trDate(r.date)}</th>`).join('')+'</tr></thead><tbody>';
+  h+='<tr><td>Sipariş</td>'+rows.map(r=>`<td><input class="order-input" data-date="${r.date}" data-original="${r.order_qty}" type="number" min="0" value="${r.order_qty}"></td>`).join('')+'</tr>';
+  h+='<tr><td>Planlanan</td>'+rows.map(r=>`<td><input class="plan-input" data-date="${r.date}" data-original="${r.planned_qty}" type="number" min="0" value="${r.planned_qty}">${r.capacity_source==='daily_override'?`<button class="reset" title="Günlük değeri kaldır" onclick="resetDaily('${r.date}')">↺</button>`:''}<span class="source">${sourceLabels[r.capacity_source]||r.capacity_source}</span></td>`).join('')+'</tr>';
+  h+='<tr><td>Üretilebilir</td>'+rows.map(r=>`<td class="${r.feasible_qty<r.planned_qty?'warn':'ok'}">${nfmt(r.feasible_qty)}</td>`).join('')+'</tr>';
+  h+='<tr><td>Gün sonu stok</td>'+rows.map(r=>`<td class="${cls(r.closing_finished_stock)}">${nfmt(r.closing_finished_stock)}</td>`).join('')+'</tr>';
+  h+='<tr><td>Eksik adet</td>'+rows.map(r=>`<td class="${r.shortage_qty?'neg':'muted'}">${nfmt(r.shortage_qty)}</td>`).join('')+'</tr>';
+  h+='<tr><td>Hammadde siparişi</td>'+rows.map(r=>`<td>${nfmt(r.raw_receipt_qty,1)}</td>`).join('')+'</tr>';
+  h+='<tr><td>Hammadde sonu</td>'+rows.map(r=>`<td class="${r.raw_configured?cls(r.closing_raw_stock):'muted'}">${r.raw_configured?nfmt(r.closing_raw_stock,1):'—'}</td>`).join('')+'</tr>';
+  h+='<tr><td>Durum</td>'+rows.map(r=>`<td style="text-align:center"><span class="status ${r.status}" title="${r.status}"></span></td>`).join('')+'</tr></tbody>';dailyTable.innerHTML=h;
+}
+
+function mondayOf(iso){const d=new Date(iso+'T12:00:00'),day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);return d.toISOString().slice(0,10)}
+function renderWeekly(){
+  let h='<thead><tr><th>Hafta</th><th>Günlük varsayılan</th><th>Sipariş</th><th>Plan</th><th>Üretilebilir</th><th>Hafta sonu stok</th><th>İlk açık</th><th>Maks. açık</th><th>Hammadde sonu</th><th>İlk ham. açığı</th></tr></thead><tbody>';
+  for(const w of BOARD.weekly){const ws=mondayOf(w.start_date),daily=BOARD.daily.filter(x=>mondayOf(x.date)===ws),custom=daily.find(x=>x.capacity_source==='weekly_default');h+=`<tr><td>${trDate(w.start_date)} – ${trDate(w.end_date)}</td><td><input type="number" min="0" id="week-${ws}" value="${custom?custom.planned_qty:''}" placeholder="Sistem hedefi" style="width:105px"><button class="reset" onclick="resetWeek('${ws}')">↺</button><button class="btn" style="padding:4px 7px" onclick="saveWeek('${ws}')">Kaydet</button></td><td>${nfmt(w.total_order_qty)}</td><td>${nfmt(w.total_planned_qty)}</td><td>${nfmt(w.total_feasible_qty)}</td><td class="${cls(w.closing_finished_stock)}">${nfmt(w.closing_finished_stock)}</td><td>${trDate(w.first_shortage_date)}</td><td class="${w.max_shortage_qty?'neg':'muted'}">${nfmt(w.max_shortage_qty)}</td><td>${daily[0]?.raw_configured?nfmt(w.closing_raw_stock,1):'—'}</td><td>${trDate(w.first_raw_shortage_date)}</td></tr>`}
+  weeklyTable.innerHTML=h+'</tbody>';
+}
+function renderMonthly(){
+  let h='<thead><tr><th>Ay</th><th>Açılış stoku</th><th>Sipariş</th><th>Plan</th><th>Üretilebilir</th><th>Ay sonu stok</th><th>İlk açık</th><th>Maks. açık</th><th>Ham. ihtiyaç</th><th>Ham. giriş</th><th>Ham. sonu</th><th>İlk ham. açığı</th></tr></thead><tbody>';
+  for(const m of BOARD.monthly)h+=`<tr><td>${m.month}</td><td>${nfmt(m.opening_finished_stock)}</td><td>${nfmt(m.total_order_qty)}</td><td>${nfmt(m.total_planned_qty)}</td><td>${nfmt(m.total_feasible_qty)}</td><td class="${cls(m.closing_finished_stock)}">${nfmt(m.closing_finished_stock)}</td><td>${trDate(m.first_shortage_date)}</td><td class="${m.max_shortage_qty?'neg':'muted'}">${nfmt(m.max_shortage_qty)}</td><td>${nfmt(m.total_raw_required_qty,1)}</td><td>${nfmt(m.total_raw_receipt_qty,1)}</td><td>${nfmt(m.closing_raw_stock,1)}</td><td>${trDate(m.first_raw_shortage_date)}</td></tr>`;
+  monthlyTable.innerHTML=h+'</tbody>';
+}
+
+async function saveDailyChanges(){
+  try{
+    const orders=[...document.querySelectorAll('.order-input')].filter(x=>Number(x.value)!==Number(x.dataset.original)).map(x=>({target_date:x.dataset.date,qty:Number(x.value||0)}));
+    const plans=[...document.querySelectorAll('.plan-input')].filter(x=>Number(x.value)!==Number(x.dataset.original));
+    if(orders.length)await api(`/api/v1/planning/orders/bulk?${scopeQuery()}`,{method:'PUT',body:JSON.stringify({items:orders})});
+    for(const x of plans)await api(`/api/v1/planning/daily-capacity?${scopeQuery()}`,{method:'PUT',body:JSON.stringify({plan_date:x.dataset.date,planned_qty:Number(x.value||0)})});
+    showMessage('Günlük sipariş ve üretim değişiklikleri kaydedildi');await loadBoard();
+  }catch(e){showMessage(e.message,'error')}
+}
+async function resetDaily(d){try{await api(`/api/v1/planning/daily-capacity/${d}?${scopeQuery()}`,{method:'DELETE'});await loadBoard()}catch(e){showMessage(e.message,'error')}}
+async function saveWeek(d){const el=document.getElementById(`week-${d}`);if(el.value===''){showMessage('Haftalık günlük değer girin','error');return}try{await api(`/api/v1/planning/weekly-capacity?${scopeQuery()}`,{method:'PUT',body:JSON.stringify({week_start:d,daily_default_qty:Number(el.value)})});await loadBoard();showMessage('Haftalık günlük varsayılan kaydedildi')}catch(e){showMessage(e.message,'error')}}
+async function resetWeek(d){try{await api(`/api/v1/planning/weekly-capacity/${d}?${scopeQuery()}`,{method:'DELETE'});await loadBoard()}catch(e){showMessage(e.message,'error')}}
+
+function finishedPayload(){return {finished_stock:Number(finishedStock.value||0),finished_stock_as_of:finishedAsOf.value,finished_safety_stock:Number(finishedSafety.value||0)}}
+function rawPayload(){return {raw_material_code:rawCode.value||null,raw_material_name:rawName.value||null,raw_unit:rawUnit.value,raw_stock_qty:Number(rawStock.value||0),raw_stock_as_of:rawAsOf.value,raw_per_piece:Number(rawPerPiece.value||0),raw_scrap_pct:Number(rawScrap.value||0),raw_safety_stock:Number(rawSafety.value||0)}}
+async function saveFinishedStock(){const body=finishedPayload();try{await api(`/api/v1/planning/finished-stock?${scopeQuery()}`,{method:'PUT',body:JSON.stringify(body)});CONFIG={...CONFIG,...body};showMessage('Mamul stok bilgisi kaydedildi');await loadBoard()}catch(e){showMessage(e.message,'error')}}
+async function saveRawMaterial(){const body=rawPayload();try{await api(`/api/v1/planning/raw-material?${scopeQuery()}`,{method:'PUT',body:JSON.stringify(body)});CONFIG={...CONFIG,...body};showMessage('Hammadde stok ve tüketim bilgisi kaydedildi');await loadBoard()}catch(e){showMessage(e.message,'error')}}
+async function saveWorkdays(){const body={workdays:[...document.querySelectorAll('#workdays input:checked')].map(x=>Number(x.value))};try{await api(`/api/v1/planning/workdays?${scopeQuery()}`,{method:'PUT',body:JSON.stringify(body)});CONFIG={...CONFIG,...body};showMessage('Çalışma günleri kaydedildi');await loadBoard()}catch(e){showMessage(e.message,'error')}}
+
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+async function loadRawOrders(){
+  if(!BOARD)return;
+  try{const first=BOARD.daily[0]?.date,last=BOARD.daily.at(-1)?.date;if(!first||!last)return;const data=await api(`/api/v1/planning/raw-orders?${scopeQuery()}&start_date=${first}&end_date=${last}`);RAW_ORDERS=data.items||[];renderRawOrders()}catch(e){showMessage(e.message,'error')}
+}
+function renderRawOrders(){
+  const active=RAW_ORDERS.filter(x=>x.status==='planned'||x.status==='confirmed'),total=active.reduce((s,x)=>s+Number(x.order_qty),0);
+  rawOrderTotal.textContent=`Tahmine dahil: ${nfmt(total,1)} ${CONFIG?.raw_unit||''} · ${active.length} parti`;
+  let h='<thead><tr><th>Tarih</th><th>Miktar</th><th>Parti / referans</th><th>Durum</th><th>Not</th><th>İşlem</th></tr></thead><tbody>';
+  for(const r of RAW_ORDERS){const id=r.raw_order_id;h+=`<tr><td><input type="date" id="ro-date-${id}" value="${r.expected_date}"></td><td><input type="number" min="0.001" step="0.001" id="ro-qty-${id}" value="${r.order_qty}"></td><td><input maxlength="100" id="ro-batch-${id}" value="${esc(r.batch_ref)}"></td><td><select id="ro-status-${id}">${Object.entries(rawStatusLabels).map(([v,t])=>`<option value="${v}" ${r.status===v?'selected':''}>${t}</option>`).join('')}</select></td><td><input maxlength="300" id="ro-notes-${id}" value="${esc(r.notes)}"></td><td><button class="btn" onclick="updateRawOrder(${id})">Kaydet</button> <button class="btn danger" onclick="deleteRawOrder(${id})">Sil</button></td></tr>`}
+  if(!RAW_ORDERS.length)h+='<tr><td colspan="6" class="muted left">Seçili dönemde hammadde siparişi yok.</td></tr>';
+  rawOrdersTable.innerHTML=h+'</tbody>';
+}
+function rawOrderPayload(prefix='rawOrder',id=null){
+  const get=n=>document.getElementById(id==null?`${prefix}${n}`:`ro-${n.toLowerCase()}-${id}`);
+  return {expected_date:get('Date').value,order_qty:Number(get('Qty').value||0),batch_ref:get('Batch').value||null,status:get('Status').value,notes:get('Notes').value||null};
+}
+async function createRawOrder(){try{const body=rawOrderPayload();await api(`/api/v1/planning/raw-orders?${scopeQuery()}`,{method:'POST',body:JSON.stringify(body)});rawOrderQty.value='';rawOrderBatch.value='';rawOrderNotes.value='';showMessage('Hammadde partisi eklendi');await loadBoard()}catch(e){showMessage(e.message,'error')}}
+async function updateRawOrder(id){try{const body=rawOrderPayload('ro',id);await api(`/api/v1/planning/raw-orders/${id}?${scopeQuery()}`,{method:'PUT',body:JSON.stringify(body)});showMessage('Hammadde siparişi güncellendi');await loadBoard()}catch(e){showMessage(e.message,'error')}}
+async function deleteRawOrder(id){if(!confirm('Bu hammadde siparişi silinsin mi?'))return;try{await api(`/api/v1/planning/raw-orders/${id}?${scopeQuery()}`,{method:'DELETE'});showMessage('Hammadde siparişi silindi');await loadBoard()}catch(e){showMessage(e.message,'error')}}
+
+function openPaste(){pasteText.value='';pasteModal.classList.add('open');pasteText.focus()}function closePaste(){pasteModal.classList.remove('open')}
+function parseQty(s){const m=String(s||'').trim().match(/^[\d.]+(?:,\d+)?/);if(!m)return 0;return Math.round(Number(m[0].replace(/\./g,'').replace(',','.'))||0)}
+function splitPasteLine(line){
+  if(line.includes('\t'))return line.split(/\t+/).map(x=>x.trim());
+  if(line.includes('|')){const c=line.split('|').map(x=>x.trim());if(!c[0])c.shift();if(!c.at(-1))c.pop();return c}
+  return line.trim().split(/\s{2,}/).map(x=>x.trim());
+}
+const months={oca:0,şub:1,sub:1,mar:2,nis:3,may:4,haz:5,tem:6,ağu:7,agu:7,eyl:8,eki:9,kas:10,ara:11};
+function parseHeaderDates(cells){let year=new Date((startDate.value||isoToday())+'T12:00:00').getFullYear(),prev=-1;return cells.map(c=>{const s=String(c).trim().toLocaleLowerCase('tr-TR');let m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);if(m)return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;m=s.match(/^(\d{1,2})[.\/-](\d{1,2})(?:[.\/-](\d{4}))?$/);if(m){const mon=Number(m[2])-1;if(m[3])year=Number(m[3]);else if(prev>=0&&mon<prev)year++;prev=mon;return `${year}-${String(mon+1).padStart(2,'0')}-${m[1].padStart(2,'0')}`}m=s.match(/^(\d{1,2})[.\s-]*([a-zçğıöşü]{3})/);if(!m)return null;const mon=months[m[2]];if(mon==null)return null;if(prev>=0&&mon<prev)year++;prev=mon;return `${year}-${String(mon+1).padStart(2,'0')}-${m[1].padStart(2,'0')}`})}
+async function applyPaste(){
+  try{
+    const lines=pasteText.value.trim().split(/\r?\n/).filter(Boolean).map(splitPasteLine).filter(r=>!r.every(c=>/^:?-{2,}:?$/.test(c)));
+    if(lines.length<2)throw new Error('En az başlık ve ürün satırı gerekli');
+    const row=lines.find(r=>r.some(c=>c.trim()===PRODUCT));
+    if(!row)throw new Error(`${PRODUCT} satırı bulunamadı`);
+    const rowIndex=lines.indexOf(row),head=lines.slice(0,rowIndex).reverse().find(r=>r.some(c=>c.toLocaleLowerCase('tr-TR')==='stok'));
+    if(!head)throw new Error('Stok ve tarih başlıkları bulunamadı');
+    const codeIndex=row.findIndex(c=>c.trim()===PRODUCT),stockIndex=codeIndex+1,headStockIndex=head.findIndex(c=>c.toLocaleLowerCase('tr-TR')==='stok');
+    const dates=parseHeaderDates(head.slice(headStockIndex+1)),items=[];
+    dates.forEach((d,i)=>{if(d)items.push({date:d,qty:parseQty(row[stockIndex+1+i])})});
+    if(!items.length)throw new Error('Tarih sütunları okunamadı');
+    items.sort((a,b)=>a.date.localeCompare(b.date));
+    const min=items[0].date,max=items[items.length-1].date;
+    finishedStock.value=parseQty(row[stockIndex]);finishedAsOf.value=min;
+    const body=finishedPayload();
+    await api(`/api/v1/planning/finished-stock?${scopeQuery()}`,{method:'PUT',body:JSON.stringify(body)});
+    CONFIG={...CONFIG,...body};startDate.value=min;
+    const span=Math.round((new Date(max)-new Date(min))/86400000)+1;
+    horizon.value=span<=31?'31':span<=90?'90':span<=180?'180':'365';
+    pendingPaste=items;closePaste();await loadBoard();
+    for(const item of pendingPaste){
+      const el=document.querySelector(`.order-input[data-date="${item.date}"]`);
+      if(el)el.value=item.qty;
+    }
+    pendingPaste=null;
+    showMessage('Stok ve stok tarihi kaydedildi, siparişler tabloya aktarıldı; kontrol edip Değişiklikleri Kaydet düğmesine basın');
+  }catch(e){showMessage(e.message,'error')}
+}
+
+startDate.value=isoToday();rawOrderDate.value=isoToday();
+loadBoard();
+</script>
+<script src="/static/auto_planning.js?v=1.08"></script>
+</body>
+</html>

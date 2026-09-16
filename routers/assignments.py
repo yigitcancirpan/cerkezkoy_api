@@ -191,16 +191,20 @@ def create_material(req: MaterialCreate, db: Session = Depends(get_db)):
     if db.execute(text("SELECT 1 FROM materials WHERE material_code = :c"),
                   {"c": code}).fetchone():
         raise HTTPException(409, f"Bu kod zaten var: {code}")
+    if req.model_id and req.model_id > 0 and db.execute(
+        text('SELECT 1 FROM materials WHERE model_id=:mid'), {'mid': req.model_id}
+    ).fetchone():
+        raise HTTPException(409, 'Bu model numarası başka malzemeye ait. Otomatik model için boş bırakın.')
     row = db.execute(text("""
         INSERT INTO materials
             (material_code, material_name, model_id, ideal_cycle_ds, default_target, notes)
         VALUES (:c, :n, :mid, :cyc, :tgt, :notes)
-        RETURNING material_id
+        RETURNING material_id, model_id
     """), {"c": code, "n": req.material_name, "mid": req.model_id,
            "cyc": req.ideal_cycle_ds, "tgt": req.default_target,
            "notes": req.notes}).fetchone()
     db.commit()
-    return {"material_id": row[0], "material_code": code, "message": "Malzeme eklendi"}
+    return {"material_id": row[0], "model_id": row[1], "material_code": code, "message": "Malzeme eklendi"}
 
 
 @router.patch("/materials/{material_id}")
@@ -209,6 +213,10 @@ def update_material(material_id: int, req: MaterialUpdate, db: Session = Depends
     ALLOWED = {"material_name", "model_id", "ideal_cycle_ds",
                "default_target", "notes", "is_active"}
     fields = {k: v for k, v in req.dict().items() if v is not None and k in ALLOWED}
+    if 'model_id' in fields:
+        old = db.execute(text('SELECT model_id FROM materials WHERE material_id=:id'), {'id': material_id}).scalar()
+        if old and old > 0 and fields['model_id'] != old:
+            raise HTTPException(409, 'Model numarası geçmiş üretimi korumak için değiştirilemez; yeni malzeme oluşturun.')
     if not fields:
         raise HTTPException(400, "Güncellenecek alan yok")
     sets = ", ".join(f"{k} = :{k}" for k in fields)
@@ -252,7 +260,7 @@ def assign_material(req: AssignRequest, db: Session = Depends(get_db)):
 
     # Vardiya tespiti — shift_utils tek kaynak (hardcode saat YOK)
     import shift_utils
-    shift_code = shift_utils.detect_shift_code()
+    shift_code = shift_utils.detect_shift_code(line_id=machine.line_id)
 
     # Önceki aktif atamayı kapat (varsa) — malzeme değişimi senaryosu
     prev = db.execute(text("""
