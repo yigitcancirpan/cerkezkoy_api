@@ -371,7 +371,7 @@ def get_shifts(
 ):
     rows = db.execute(text("""
         SELECT * FROM shift_summary
-        WHERE line_id = :lid AND shift_date >= CURRENT_DATE - :days
+        WHERE line_id = :lid AND shift_date >= CURRENT_DATE - CAST(:days AS integer)
         ORDER BY shift_date DESC, shift
     """), {"lid": line_id, "days": days}).fetchall()
     return [dict(r._mapping) for r in rows]

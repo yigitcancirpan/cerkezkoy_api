@@ -24,6 +24,13 @@
 
   .card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:12px;}
   .card-label{font-size:9px;letter-spacing:1.5px;color:var(--dim);text-transform:uppercase;margin-bottom:10px;}
+  .material-filter{display:flex;gap:10px;align-items:end;flex-wrap:wrap;}
+  .material-filter label{display:flex;flex-direction:column;gap:5px;font-size:10px;color:var(--dim);}
+  .material-filter select,.material-filter input{background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:7px 9px;max-width:min(460px,78vw);}
+  .material-filter button,.material-filter a{background:var(--blue);color:white;border:1px solid var(--blue);border-radius:7px;padding:7px 12px;font-size:11px;font-weight:700;text-decoration:none;cursor:pointer;}
+  .material-filter a{background:var(--card2);border-color:var(--border);color:var(--text);}
+  .material-summary{font-family:'JetBrains Mono',monospace;font-size:12px;margin-top:11px}.material-note{font-size:10px;color:var(--dim);margin-top:5px;line-height:1.4;}
+  .material-table{overflow:auto;margin-top:10px}.material-table table{width:100%;border-collapse:collapse;font-size:11px}.material-table th,.material-table td{padding:7px 8px;border-bottom:1px solid var(--border);text-align:left}.material-table th{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;}.material-table small{color:var(--dim)}
 
   .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;}
   .controls label{font-size:11px;color:var(--dim);}
@@ -67,7 +74,7 @@
 
   .footer{text-align:center;color:var(--dim);font-size:10px;margin-top:10px;}
 </style>
-<script src="/static/material_reporting.js?v=1.08" defer></script>
+<script src="/static/material_reporting.js?v=1.08a" defer></script>
 </head>
 <body>
 
@@ -83,14 +90,7 @@
 
 <!-- ÜRETİM & OEE -->
 <div class="panel active" id="panel-prod">
-  <div class="controls">
-    <label>Aralık:</label>
-    <div class="seg" id="daysSeg">
-      <button data-d="7">7 gün</button>
-      <button data-d="15" class="on">15 gün</button>
-      <button data-d="30">30 gün</button>
-    </div>
-  </div>
+  <div id="materialReportMount"></div>
 
   <div class="kpis">
     <div class="kpi"><div class="v" style="color:var(--green);" id="kProd">—</div><div class="l">Toplam Üretim</div></div>
@@ -362,13 +362,15 @@ function todayLocal(){const n=new Date();return new Date(n.getTime()-n.getTimezo
 function dateNDaysAgo(n){const d=new Date();d.setDate(d.getDate()-n);return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);}
 function timeTicks(series){const xs=[];series.forEach(s=>s.pts.forEach(p=>xs.push(p.x)));if(!xs.length)return[];const mn=Math.min(...xs),mx=Math.max(...xs);const t=[];for(let i=0;i<=6;i++){const x=mn+(mx-mn)*i/6;t.push({x,label:fmtHM(x)});}return t;}
 
-let prodDays=15;
 async function loadProduction(){
   try{
-    const selectedMaterial=new URLSearchParams(location.search).get('material_id');
+    const filter=window.materialHistoryFilter?window.materialHistoryFilter():null;
+    const selectedMaterial=filter?.material_id??new URLSearchParams(location.search).get('material_id');
+    const start=filter?.start||dateNDaysAgo(15),end=filter?.end||todayLocal();
+    const suffix=selectedMaterial!==null&&selectedMaterial!==''?'&material_id='+encodeURIComponent(selectedMaterial):'';
     const [shiftResponse,oeeResponse]=await Promise.all([
-      fetch(`${API}/api/v1/material-report?line_id=${LID}&start=${dateNDaysAgo(prodDays)}&end=${todayLocal()}${selectedMaterial!==null?'&material_id='+encodeURIComponent(selectedMaterial):''}`),
-      fetch(`${API}/api/v1/production/oee?line_id=${LID}&date_from=${dateNDaysAgo(prodDays)}&date_to=${todayLocal()}`)
+      fetch(`${API}/api/v1/material-report?line_id=${LID}&start=${start}&end=${end}${suffix}`),
+      fetch(`${API}/api/v1/production/oee?line_id=${LID}&date_from=${start}&date_to=${end}`)
     ]);
     if(!shiftResponse.ok||!oeeResponse.ok){
       emptyMsg(document.getElementById('prodChart'),'Veri alınamadı');
@@ -494,11 +496,6 @@ function switchTab(name){
   document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active',p.id==='panel-'+name));
   if(name==='oil') loadOil();
 }
-document.getElementById('daysSeg').addEventListener('click',e=>{
-  if(e.target.tagName!=='BUTTON')return;
-  document.querySelectorAll('#daysSeg button').forEach(b=>b.classList.remove('on'));
-  e.target.classList.add('on');prodDays=+e.target.dataset.d;loadProduction();
-});
 document.getElementById('oilDaysSeg').addEventListener('click',e=>{
   if(e.target.tagName!=='BUTTON')return;
   document.querySelectorAll('#oilDaysSeg button').forEach(b=>b.classList.remove('on'));
@@ -519,7 +516,6 @@ if (LID !== 1) {
   if (oilTab) oilTab.style.display = 'none';
 }
 
-loadProduction();
 </script>
 </body>
 </html>

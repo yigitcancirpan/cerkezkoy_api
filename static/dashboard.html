@@ -68,10 +68,16 @@
   th{text-align:left;padding:6px 8px;color:var(--dim);font-size:9px;letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid var(--border);}
   td{padding:6px 8px;border-bottom:1px solid var(--border);}
   .oee-badge{display:inline-block;padding:2px 6px;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;}
+  .shift-main:hover{background:#162032;}.shift-main.open{background:#162032;}
+  .shift-chevron{display:inline-block;width:14px;color:var(--blue);font-weight:900;transition:transform .15s}.shift-main.open .shift-chevron{transform:rotate(90deg)}
+  .shift-materials{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px;padding:4px 0;}
+  .shift-material{background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:9px 10px;}
+  .shift-material-title{font-weight:800;color:var(--text);font-size:11px}.shift-material-name{color:var(--dim);font-size:10px;margin-top:2px;white-space:normal;}
+  .shift-material-values{display:flex;gap:14px;margin-top:7px;font-family:'JetBrains Mono',monospace;font-size:11px;flex-wrap:wrap;}
+  .shift-detail-link{display:inline-block;margin-left:6px;color:var(--purple);font-size:9px;text-decoration:none;}
 
   .footer{text-align:center;color:var(--dim);font-size:10px;margin-top:10px;}
 </style>
-<script src="/static/material_reporting.js?v=1.08" defer></script>
 </head>
 <body>
 
@@ -98,9 +104,10 @@
 <!-- ANA KARTLAR -->
 <div class="grid4">
   <div class="card">
-    <div class="card-label">Üretilen</div>
+    <div class="card-label">Üretilen · Hat Toplamı</div>
     <div class="card-value" style="color:var(--green);" id="produced">—</div>
     <div class="card-sub" id="targetSub">Hedef: —</div>
+    <div class="card-sub" id="materialSub">Aktif malzeme: —</div>
   </div>
   <div class="card">
     <div class="card-label">Fire</div>
@@ -281,7 +288,7 @@ function setNoDataIndicators(){
   document.getElementById('dtStatus').style.color='var(--dim)';
   document.getElementById('dtSub').textContent='Veri bekleniyor';
 }
-let curProduced = 0;
+let curProduced = 0, currentMaterialId = null;
 const scrapState = {total:0, by_reason:[]};
 function renderScrapQuality(){
   const sc = scrapState.total;
@@ -468,7 +475,10 @@ async function fetchCurrent(){
 
     const avg=d.average_cycle||0;
     document.getElementById('avgCycle').textContent=avg>0?`Ort: ${(avg/10).toFixed(1)}s`:'—';
-    document.getElementById('modelBadge').textContent=d.material_code?`${d.material_code} · ${d.material_name}`:'Belirsiz malzeme';
+    const materialText=d.material_code?`${d.material_code} · ${d.material_name}`:'Belirsiz malzeme';
+    currentMaterialId=d.material_id||null;
+    document.getElementById('modelBadge').textContent=materialText;
+    document.getElementById('materialSub').textContent=`Aktif malzeme: ${materialText}`;
 
     // İlk/Son baskı
     document.getElementById('firstCycle').textContent=fmtTime(d.first_cycle_at);
@@ -572,13 +582,31 @@ async function fetchShifts(){
     const data=await r.json();
     const tb=document.getElementById('shiftTable');
     if(!data.length){tb.innerHTML='<tr><td colspan="7" style="color:var(--dim);text-align:center;">Veri yok</td></tr>';return;}
-    tb.innerHTML=data.map(s=>{
+    tb.innerHTML=data.map((s,index)=>{
       const oee=s.oee_overall||0;
       let oc='var(--green)';if(oee<60)oc='var(--red)';else if(oee<80)oc='var(--amber)';
       const sl={'vardiya_1':'V1','vardiya_2':'V2','vardiya_3':'V3'}[s.shift]||s.shift;
-      return `<tr style="cursor:pointer" onclick="window.open('/static/downtimes.html?date=${s.shift_date}&shift=${s.shift}&line_id=${LID}&produced=${s.total_produced||0}&scrap=${s.total_scrap||0}','_blank')"><td>${s.shift_date}</td><td>${sl}</td><td style="font-weight:700;color:var(--green)">${s.total_produced||0}</td><td style="color:var(--red)">${s.total_scrap||0}</td><td>${Math.round((s.total_downtime_sec||0)/60)} dk</td><td style="color:var(--dim)">${Math.round((s.break_sec||0)/60)} dk</td><td><span class="oee-badge" style="background:${oc}20;color:${oc};">%${oee.toFixed(1)}</span></td></tr>`;
+      const details=`/static/downtimes.html?date=${encodeURIComponent(s.shift_date)}&shift=${encodeURIComponent(s.shift)}&line_id=${LID}&produced=${s.total_produced||0}&scrap=${s.total_scrap||0}`;
+      return `<tr class="shift-main" data-detail="shift-detail-${index}" data-date="${s.shift_date}" data-shift="${s.shift}"><td><span class="shift-chevron">›</span>${s.shift_date}</td><td>${sl}</td><td style="font-weight:700;color:var(--green)">${s.total_produced||0}</td><td style="color:var(--red)">${s.total_scrap||0}</td><td>${Math.round((s.total_downtime_sec||0)/60)} dk</td><td style="color:var(--dim)">${Math.round((s.break_sec||0)/60)} dk</td><td><span class="oee-badge" style="background:${oc}20;color:${oc};">%${oee.toFixed(1)}</span><a class="shift-detail-link" href="${details}" target="_blank" onclick="event.stopPropagation()">Duruş ↗</a></td></tr><tr id="shift-detail-${index}" hidden><td colspan="7"><div class="shift-materials"><span style="color:var(--dim)">Malzeme detayı yükleniyor…</span></div></td></tr>`;
     }).join('');
+    tb.querySelectorAll('.shift-main').forEach(row=>row.addEventListener('click',()=>toggleShiftMaterials(row)));
   }catch(e){}
+}
+
+const escHtml=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function toggleShiftMaterials(row){
+  const detail=document.getElementById(row.dataset.detail),opening=detail.hidden;
+  detail.hidden=!opening;row.classList.toggle('open',opening);
+  if(!opening||detail.dataset.loaded)return;
+  const holder=detail.querySelector('.shift-materials');
+  try{
+    const qs=new URLSearchParams({line_id:LID,start:row.dataset.date,end:row.dataset.date,shift:row.dataset.shift});
+    const response=await fetch(`${API}/api/v1/material-report?${qs}`);
+    if(!response.ok)throw new Error(`HTTP ${response.status}`);
+    const data=await response.json();
+    holder.innerHTML=data.items.length?data.items.map(item=>`<div class="shift-material"><div class="shift-material-title">${escHtml(item.material_code)}</div><div class="shift-material-name">${escHtml(item.material_name)}</div><div class="shift-material-values"><span style="color:var(--green)">Üretim ${Number(item.produced||0).toLocaleString('tr-TR')}</span><span style="color:var(--red)">Fire ${Number(item.scrap||0).toLocaleString('tr-TR')}</span><span>Sağlam ${item.good===null?'—':Number(item.good).toLocaleString('tr-TR')}</span></div></div>`).join(''):'<span style="color:var(--dim)">Bu vardiyada malzeme ayrımı bulunamadı.</span>';
+    detail.dataset.loaded='1';
+  }catch(error){holder.innerHTML=`<span style="color:var(--red)">Malzeme detayı alınamadı: ${escHtml(error.message)}</span>`;}
 }
 
 // Özet hesapla
@@ -689,7 +717,7 @@ async function addScrap(){
   if(!rid||!qty||qty<1){alert('Sebep ve adet gir');return;}
   try{
     const r=await fetch(`${API}/api/v1/scrap/entry`,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({line_id:LID,reason_id:rid,qty:qty,shift:currentShiftCode(),source:'dashboard'})});
+      body:JSON.stringify({line_id:LID,reason_id:rid,qty:qty,material_id:currentMaterialId,shift:currentShiftCode(),source:'dashboard'})});
     if(!r.ok){let m=r.status;try{m=(await r.json()).detail||m;}catch{} alert('Hata: '+m);return;}
     document.getElementById('scrapQty').value=1;
     fetchScrap(); fetchScrapList();

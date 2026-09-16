@@ -38,12 +38,11 @@
   #autoComparison .selected-plan td{background:#0d2a19;color:#bbf7d0;font-weight:800}
   #autoComparison .selected-plan td:first-child{background:#0d2a19}
 </style>
-<script src="/static/material_reporting.js?v=1.08" defer></script>
 </head>
 <body>
 <div class="top">
   <div><h1>📋 Üretim <span>Planlama</span></h1><div class="scope" id="scopeText">World Hattı · 2962070700</div></div>
-  <div class="top-right"><a class="badge" id="dashboardLink" href="/static/dashboard.html">← Dashboard</a><span class="badge" id="targetBadge">Hedef: —</span></div>
+  <div class="top-right"><label>Malzeme <select id="productSelect"></select></label><a class="badge" id="dashboardLink" href="/static/dashboard.html">← Dashboard</a><span class="badge" id="targetBadge">Hedef: —</span></div>
 </div>
 
 <div id="message" class="message"></div>
@@ -232,6 +231,15 @@ async function loadConfig(){
   const floor=document.getElementById('autoMinimumStock');if(floor.value==='')floor.value=CONFIG.finished_safety_stock;
   fillConfig();
 }
+async function loadProductSelector(){
+  try{
+    const rows=await api('/api/v1/assignments/materials?include_inactive=false');
+    const products=rows.filter(x=>['2962070700','2962070100'].includes(x.material_code));
+    productSelect.innerHTML=products.map(x=>`<option value="${esc(x.material_code)}">${esc(x.material_code)} · ${esc(x.material_name)}</option>`).join('');
+    productSelect.value=PRODUCT;
+    productSelect.onchange=()=>{const u=new URL(location.href);u.searchParams.set('line',LID);u.searchParams.set('product_code',productSelect.value);location.href=u.href;};
+  }catch(error){showMessage('Malzeme listesi alınamadı: '+error.message,'error')}
+}
 function fillConfig(){
   const c=CONFIG; finishedStock.value=c.finished_stock;finishedAsOf.value=c.finished_stock_as_of;finishedSafety.value=c.finished_safety_stock;
   rawCode.value=c.raw_material_code||'';rawName.value=c.raw_material_name||'';rawUnit.value=c.raw_unit||'kg';rawStock.value=c.raw_stock_qty;rawAsOf.value=c.raw_stock_as_of;rawPerPiece.value=c.raw_per_piece;rawScrap.value=c.raw_scrap_pct;rawSafety.value=c.raw_safety_stock;
@@ -359,7 +367,7 @@ async function applyPaste(){
 }
 
 startDate.value=isoToday();rawOrderDate.value=isoToday();
-loadBoard();
+loadProductSelector();loadBoard();
 </script>
 <script src="/static/auto_planning.js?v=1.08"></script>
 </body>

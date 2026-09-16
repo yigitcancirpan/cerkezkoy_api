@@ -80,7 +80,6 @@
 
   .footer{text-align:center;color:var(--dim);font-size:10px;margin-top:10px;}
 </style>
-<script src="/static/material_reporting.js?v=1.08" defer></script>
 </head>
 <body>
 
@@ -334,6 +333,12 @@ async function apiJson(url,options){
   if(!response.ok)throw new Error((data&&data.detail)||`HTTP ${response.status}`);
   return data;
 }
+async function loadRetroMaterials(){
+  const materials=await apiJson(`${API}/api/v1/assignments/materials?include_inactive=false`);
+  const select=document.getElementById('retroMaterial');
+  select.innerHTML='<option value="">Tek malzemeyse otomatik eşle</option>'+materials.map(m=>`<option value="${m.material_id}">${escapeHtml(m.material_code+' · '+m.material_name)}</option>`).join('');
+  if(selectedMaterialId!==null&&Number(selectedMaterialId)>0)select.value=selectedMaterialId;
+}
 function retroMessage(text,type=''){
   retroMessageEl.textContent=text||'';
   retroMessageEl.className=`retro-msg ${type}`.trim();
@@ -508,7 +513,7 @@ if(dayPickEl) dayPickEl.addEventListener('change',e=>{
 });
 
 load();
-loadRetroOptions();
+Promise.all([loadRetroMaterials(),loadRetroOptions()]).catch(error=>retroMessage(error.message,'err'));
 </script>
 </body>
 </html>
